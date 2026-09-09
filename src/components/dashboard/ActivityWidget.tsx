@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Plus, Pencil, Trash2, Lightbulb, FolderKanban, CalendarPlus, Play, Square, LayoutGrid, Star, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight, Check, Plus, Pencil, Trash2, Lightbulb, FolderKanban, CalendarPlus, Play, Square, LayoutGrid, Star, SlidersHorizontal, GraduationCap, PartyPopper } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { timeAgo } from '../../lib/date';
 import type { ActivityType } from '../../types';
@@ -19,6 +19,8 @@ const ICONS: Record<ActivityType, { icon: typeof Check; color: string }> = {
   board_created: { icon: LayoutGrid, color: 'text-pink-400' },
   level_up: { icon: Star, color: 'text-yellow-400' },
   settings_updated: { icon: SlidersHorizontal, color: 'text-zinc-400' },
+  english_session_completed: { icon: GraduationCap, color: 'text-blue-400' },
+  workday_complete: { icon: PartyPopper, color: 'text-green-400' },
 };
 
 export function ActivityWidget() {

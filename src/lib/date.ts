@@ -2,6 +2,7 @@ import {
   format,
   parseISO,
   isToday as fnsIsToday,
+  isYesterday as fnsIsYesterday,
   isThisWeek,
   isThisMonth,
   startOfWeek,
@@ -10,6 +11,7 @@ import {
 } from 'date-fns';
 
 export const todayISO = () => format(new Date(), 'yyyy-MM-dd');
+export const yesterdayISO = () => format(addDays(new Date(), -1), 'yyyy-MM-dd');
 export const nowISO = () => new Date().toISOString();
 export const nowTimeHHmm = () => format(new Date(), 'HH:mm');
 
@@ -24,6 +26,15 @@ export function fmtDateShort(iso: string) {
 export function isTodayISO(iso: string | null) {
   if (!iso) return false;
   return fnsIsToday(parseISO(iso));
+}
+
+export function isYesterdayISO(iso: string | null) {
+  if (!iso) return false;
+  return fnsIsYesterday(parseISO(iso));
+}
+
+export function fmtDateTime(iso: string) {
+  return format(parseISO(iso), 'MMMM d, yyyy · h:mm a');
 }
 
 export function isThisWeekISO(iso: string | null) {

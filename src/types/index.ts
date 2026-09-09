@@ -118,7 +118,9 @@ export type ActivityType =
   | 'timer_stopped'
   | 'board_created'
   | 'level_up'
-  | 'settings_updated';
+  | 'settings_updated'
+  | 'english_session_completed'
+  | 'workday_complete';
 
 export interface Activity {
   id: string;
@@ -153,4 +155,90 @@ export interface RunningTimer {
   startedAt: string | null; // ISO datetime; null = not running
   isPaused: boolean;
   accumulatedSeconds: number; // seconds banked before the current run (from pauses)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// TEOPM Workday
+//
+// Deliberately NOT a parallel task system: a "workday task" is just a Task
+// with projectId === the TEOPM project. dueDate is the workday date, dueTime
+// is the start time, estimatedMinutes/actualMinutes are planned/actual
+// duration — every field already exists on Task. This type documents the
+// shape the daily 8h rollup is derived from; it is computed by a selector
+// (see store/selectors.ts) rather than persisted, so history for past days
+// falls out of the existing Task/TimeSession records for free — nothing to
+// keep in sync.
+// ─────────────────────────────────────────────────────────────────────────
+export interface DailyWorkday {
+  date: string; // ISO date
+  workedMinutes: number;
+  targetMinutes: number; // always 480 (8h) for V1
+  tasksCompleted: number;
+  tasksTotal: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// English Lab
+// ─────────────────────────────────────────────────────────────────────────
+
+export type EnglishExerciseType =
+  | 'grammar'
+  | 'vocabulary'
+  | 'listening'
+  | 'dictation'
+  | 'business'
+  | 'writing'
+  | 'speaking';
+
+export interface EnglishExercise {
+  id: string;
+  type: EnglishExerciseType;
+  topicTag: string; // e.g. "Present Perfect", "Prepositions", "Business vocabulary" — powers Needs Practice
+  prompt: string;
+  scenario?: string; // extra framing line, e.g. "Your manager says:"
+  audioText?: string; // spoken via SpeechSynthesis for listening/dictation
+  options?: string[]; // multiple choice
+  correctIndex?: number;
+  definition?: string; // shown after answering, vocabulary exercises
+  explanation: string;
+  modelAnswer?: string; // writing/speaking reference answer
+  keyPhrases?: string[]; // writing/speaking heuristic scoring hints
+}
+
+export interface EnglishAnswer {
+  exerciseId: string;
+  type: EnglishExerciseType;
+  topicTag: string;
+  correct: boolean;
+  score?: number; // 0-100, writing/speaking only
+  userResponse: string;
+  xpEarned: number;
+  timestamp: string;
+}
+
+export interface EnglishSession {
+  id: string;
+  date: string; // ISO date
+  mode: 'daily' | 'weak-areas';
+  exerciseIds: string[];
+  answers: EnglishAnswer[];
+  score: number; // correct-equivalent out of exerciseIds.length
+  xpEarned: number;
+  completedAt: string;
+}
+
+/** Computed (not persisted) — see selectors.englishProgressByType */
+export interface EnglishProgress {
+  grammar: number;
+  vocabulary: number;
+  listening: number;
+  business: number;
+  writing: number;
+  speaking: number;
+}
+
+/** Computed (not persisted) — see selectors.englishMistakesByTopic */
+export interface EnglishMistake {
+  topicTag: string;
+  count: number;
 }

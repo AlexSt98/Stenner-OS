@@ -2,12 +2,14 @@ import { NavLink } from 'react-router-dom';
 import {
   Sparkles,
   Home,
+  Briefcase,
   CheckSquare,
   Calendar,
   Clock,
   LayoutGrid,
   Lightbulb,
   FolderKanban,
+  Languages,
   BarChart2,
   Settings as SettingsIcon,
 } from 'lucide-react';
@@ -15,12 +17,14 @@ import { useStore } from '../../store/useStore';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: Home, end: true },
+  { to: '/teopm', label: 'TEOPM', icon: Briefcase },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },
   { to: '/time-tracker', label: 'Time Tracker', icon: Clock },
   { to: '/boards', label: 'Boards', icon: LayoutGrid },
   { to: '/ideas', label: 'Ideas Vault', icon: Lightbulb },
   { to: '/projects', label: 'Projects', icon: FolderKanban },
+  { to: '/english', label: 'English Lab', icon: Languages },
   { to: '/stats', label: 'Stats', icon: BarChart2 },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

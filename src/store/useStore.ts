@@ -15,6 +15,8 @@ import type {
   RunningTimer,
   TaskStatus,
   Priority,
+  EnglishSession,
+  EnglishAnswer,
 } from '../types';
 import {
   SEED_PROJECTS,
@@ -26,7 +28,7 @@ import {
   SEED_ACTIVITIES,
   SEED_SETTINGS,
 } from './seed';
-import { nowISO, todayISO } from '../lib/date';
+import { nowISO, todayISO, yesterdayISO } from '../lib/date';
 import { XP_PER_TASK } from '../lib/gamification';
 
 const EMPTY_TIMER: RunningTimer = {
@@ -39,6 +41,13 @@ const EMPTY_TIMER: RunningTimer = {
   accumulatedSeconds: 0,
 };
 
+export interface EnglishStats {
+  streak: number;
+  lastPracticeDate: string | null;
+}
+
+const EMPTY_ENGLISH_STATS: EnglishStats = { streak: 0, lastPracticeDate: null };
+
 interface StennerState {
   tasks: Task[];
   projects: Project[];
@@ -49,6 +58,8 @@ interface StennerState {
   activities: Activity[];
   settings: UserSettings;
   timer: RunningTimer;
+  englishSessions: EnglishSession[];
+  englishStats: EnglishStats;
 
   // ── Tasks ────────────────────────────────────────────────
   addTask: (input: Partial<Task> & { title: string }) => Task;
@@ -95,6 +106,14 @@ interface StennerState {
   // ── Settings / misc ──────────────────────────────────────
   updateSettings: (patch: Partial<UserSettings>) => void;
   resetDemoData: () => void;
+
+  // ── English Lab ──────────────────────────────────────────
+  addEnglishXp: (amount: number) => void;
+  recordEnglishSession: (input: {
+    mode: 'daily' | 'weak-areas';
+    exerciseIds: string[];
+    answers: EnglishAnswer[];
+  }) => EnglishSession;
 }
 
 function logActivityInto(activities: Activity[], type: ActivityType, message: string, meta?: Record<string, string>) {
@@ -107,15 +126,29 @@ function bumpStreakAndXp(settings: UserSettings, xpDelta: number): UserSettings 
   let { streak, lastActiveDate } = settings;
   if (xpDelta > 0) {
     if (lastActiveDate !== today) {
-      const last = lastActiveDate ? new Date(lastActiveDate) : null;
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const wasYesterday = last && last.toDateString() === yesterday.toDateString();
+      // Compare plain "yyyy-MM-dd" strings, not Date objects — parsing a
+      // date-only string builds it at UTC midnight, so comparing it against
+      // a locally-computed "yesterday" can be off by a day in timezones
+      // behind UTC. String equality sidesteps that entirely.
+      const wasYesterday = lastActiveDate === yesterdayISO();
       streak = wasYesterday ? streak + 1 : 1;
       lastActiveDate = today;
     }
   }
   return { ...settings, xp: Math.max(0, settings.xp + xpDelta), streak, lastActiveDate };
+}
+
+/** English XP feeds the same global XP/level shown on Home, but never touches the main productivity streak. */
+function addXpOnly(settings: UserSettings, amount: number): UserSettings {
+  return { ...settings, xp: Math.max(0, settings.xp + amount) };
+}
+
+/** English Lab keeps its own day-consecutive streak, independent of task-completion streak. */
+function bumpEnglishStreak(stats: EnglishStats): EnglishStats {
+  const today = todayISO();
+  if (stats.lastPracticeDate === today) return stats; // already practiced today, no double-count
+  const wasYesterday = stats.lastPracticeDate === yesterdayISO();
+  return { streak: wasYesterday ? stats.streak + 1 : 1, lastPracticeDate: today };
 }
 
 export const useStore = create<StennerState>()(
@@ -130,6 +163,8 @@ export const useStore = create<StennerState>()(
       activities: SEED_ACTIVITIES,
       settings: SEED_SETTINGS,
       timer: EMPTY_TIMER,
+      englishSessions: [],
+      englishStats: EMPTY_ENGLISH_STATS,
 
       // ── Tasks ────────────────────────────────────────────
       addTask: (input) => {
@@ -511,7 +546,41 @@ export const useStore = create<StennerState>()(
           activities: SEED_ACTIVITIES,
           settings: SEED_SETTINGS,
           timer: EMPTY_TIMER,
+          englishSessions: [],
+          englishStats: EMPTY_ENGLISH_STATS,
         }));
+      },
+
+      // ── English Lab ──────────────────────────────────────
+      addEnglishXp: (amount) => {
+        set((s) => ({ settings: addXpOnly(s.settings, amount) }));
+      },
+
+      recordEnglishSession: (input) => {
+        const correct = input.answers.filter((a) => a.correct).length;
+        const xpEarned = input.answers.reduce((sum, a) => sum + a.xpEarned, 0);
+        const session: EnglishSession = {
+          id: uuid(),
+          date: todayISO(),
+          mode: input.mode,
+          exerciseIds: input.exerciseIds,
+          answers: input.answers,
+          score: correct,
+          xpEarned,
+          completedAt: nowISO(),
+        };
+        set((s) => ({
+          englishSessions: [session, ...s.englishSessions],
+          englishStats: input.mode === 'daily' ? bumpEnglishStreak(s.englishStats) : s.englishStats,
+          activities: logActivityInto(
+            s.activities,
+            'english_session_completed',
+            input.mode === 'daily'
+              ? `Completed Daily English Challenge — ${correct}/${input.exerciseIds.length}`
+              : `Practiced weak areas in English Lab — ${correct}/${input.exerciseIds.length}`
+          ),
+        }));
+        return session;
       },
     }),
     {

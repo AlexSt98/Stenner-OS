@@ -12,9 +12,11 @@ import { TaskFormModal } from './TaskFormModal';
 interface TaskDetailModalProps {
   task: Task | null;
   onClose: () => void;
+  /** Swap in a purpose-built edit modal (e.g. TEOPM Workday's duration-aware form) instead of the generic one. */
+  renderEditModal?: (props: { task: Task; open: boolean; onClose: () => void }) => React.ReactNode;
 }
 
-export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
+export function TaskDetailModal({ task, onClose, renderEditModal }: TaskDetailModalProps) {
   const projects = useStore((s) => s.projects);
   const startTimer = useStore((s) => s.startTimer);
   const toggleTaskComplete = useStore((s) => s.toggleTaskComplete);
@@ -117,7 +119,11 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
         </div>
       </Modal>
 
-      <TaskFormModal open={editing} onClose={() => setEditing(false)} task={task} />
+      {renderEditModal ? (
+        renderEditModal({ task, open: editing, onClose: () => setEditing(false) })
+      ) : (
+        <TaskFormModal open={editing} onClose={() => setEditing(false)} task={task} />
+      )}
 
       <Modal open={confirmingDelete} onClose={() => setConfirmingDelete(false)} title="Delete task?" width={380}
         footer={

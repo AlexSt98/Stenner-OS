@@ -1,16 +1,28 @@
-import { RefreshCw, Clock, Flame, FolderKanban, Star } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Clock, Flame, FolderKanban, Star, Briefcase, Languages } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 import { ProgressBar } from '../common/ProgressBar';
-import { fmtHM } from '../../lib/date';
-import { isTodayISO } from '../../lib/date';
-import { todaysTasks, activeProjectsCount, focusSecondsToday } from '../../store/selectors';
+import { fmtHM, isTodayISO, todayISO } from '../../lib/date';
+import {
+  todaysTasks,
+  activeProjectsCount,
+  focusSecondsToday,
+  teopmDayStats,
+  toDecimalHours,
+  WORKDAY_TARGET_MINUTES,
+  englishSessionForDate,
+} from '../../store/selectors';
 import { levelFromXp, xpProgressPct } from '../../lib/gamification';
+import { getDailyQuote } from '../../lib/quotes';
 
 export function StatsRow() {
+  const navigate = useNavigate();
   const tasks = useStore((s) => s.tasks);
   const projects = useStore((s) => s.projects);
   const timeSessions = useStore((s) => s.timeSessions);
   const settings = useStore((s) => s.settings);
+  const englishSessions = useStore((s) => s.englishSessions);
+  const englishStats = useStore((s) => s.englishStats);
 
   const todayTaskList = todaysTasks(tasks);
   const doneToday = todayTaskList.filter((t) => t.status === 'Done').length;
@@ -28,8 +40,16 @@ export function StatsRow() {
   const level = levelFromXp(settings.xp);
   const levelPct = xpProgressPct(settings.xp);
 
+  const today = todayISO();
+  const workday = teopmDayStats(tasks, today);
+  const workdayPct = Math.min(100, (workday.workedMinutes / WORKDAY_TARGET_MINUTES) * 100);
+
+  const englishToday = englishSessionForDate(englishSessions, today);
+
+  const quote = getDailyQuote();
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3.5">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
       <div className="stenner-card stenner-card-hover p-4">
         <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 mb-2.5">
           <RefreshCw size={12} className="text-green-400" /> TODAY'S TASKS
@@ -70,6 +90,30 @@ export function StatsRow() {
         <div className="text-[11.5px] text-zinc-500 mt-1.5">{onTrackCount} on track</div>
       </div>
 
+      <button onClick={() => navigate('/teopm')} className="stenner-card stenner-card-hover p-4 text-left">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 mb-2.5">
+          <Briefcase size={12} className="text-blue-400" /> TEOPM WORKDAY
+        </div>
+        <div className="text-[22px] font-bold leading-none">{toDecimalHours(workday.workedMinutes)}h</div>
+        <div className="text-[11.5px] text-zinc-500 mt-1.5">
+          {workday.tasksCompleted} / {workday.tasksTotal} tasks
+        </div>
+        <div className="mt-2.5 flex items-center gap-2">
+          <ProgressBar value={workdayPct} color="var(--color-accent-blue)" />
+          <span className="text-[11px] text-zinc-500 shrink-0">/ 8h</span>
+        </div>
+      </button>
+
+      <button onClick={() => navigate('/english')} className="stenner-card stenner-card-hover p-4 text-left">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 mb-2.5">
+          <Languages size={12} className="text-pink-400" /> ENGLISH
+        </div>
+        <div className="text-[22px] font-bold leading-none">
+          {englishToday ? `${englishToday.score} / ${englishToday.exerciseIds.length}` : '— / 10'}
+        </div>
+        <div className="text-[11.5px] text-orange-400/80 mt-1.5 font-medium">🔥 {englishStats.streak} day streak</div>
+      </button>
+
       <div className="stenner-card stenner-card-hover p-4">
         <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-zinc-500 mb-2.5">
           <Star size={12} className="text-yellow-400" /> XP / LEVEL
@@ -83,8 +127,9 @@ export function StatsRow() {
       </div>
 
       <div className="stenner-card p-4 flex flex-col justify-center bg-gradient-to-br from-violet-600/10 to-transparent">
-        <div className="text-[13px] italic text-zinc-300 leading-snug">"Discipline builds the freedom you want."</div>
-        <div className="text-[11px] text-zinc-600 mt-2">— STENNER OS</div>
+        <div className="text-[12.5px] italic text-zinc-300 leading-snug">"{quote.en}"</div>
+        <div className="text-[11.5px] italic text-zinc-500 leading-snug mt-1">"{quote.es}"</div>
+        <div className="text-[10.5px] text-zinc-600 mt-2">— STENNER OS</div>
       </div>
     </div>
   );
