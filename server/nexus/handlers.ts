@@ -9,12 +9,12 @@
 // no matter which one is serving the request.
 // ─────────────────────────────────────────────────────────────────────────
 import type { AIProvider, ChatMessage, ToolDeclaration } from '../providers/AIProvider.js';
-import { extractDocumentText } from './fileExtract.js';
-
-export interface NexusStatusResponse {
-  connected: boolean;
-  provider: string;
-}
+// getNexusStatus/NexusStatusResponse live in ./status.ts, NOT here — that
+// module is kept completely free of fileExtract.ts's dependencies (pdf-parse
+// et al., which pull in a native addon — see the dynamic import in
+// prepareAttachments below for why that matters). Callers that only need
+// the status check (api/nexus/status.ts, server/index.ts) import it from
+// ./status.js directly, never through this file.
 
 /** A file the frontend attached to the LAST message in the request — see src/lib/nexus/client.ts. */
 export interface NexusAttachment {
@@ -37,13 +37,6 @@ export const NEXUS_META_MARKER = '\n\n[[NEXUS_META]]';
 export const NEXUS_PHASE_MARKER_PREFIX = '\n\n[[NEXUS_PHASE:';
 export const NEXUS_PHASE_MARKER_SUFFIX = ']]\n\n';
 
-export function getNexusStatus(provider: AIProvider): NexusStatusResponse {
-  return {
-    connected: provider.isConfigured(),
-    provider: provider.name,
-  };
-}
-
 /** True when `body` has the minimum shape needed to call the provider. */
 export function isValidChatBody(body: unknown): body is NexusChatBody & { messages: ChatMessage[] } {
   const b = body as Partial<NexusChatBody> | null | undefined;
@@ -61,24 +54,34 @@ function dataUrlToBuffer(dataUrl: string): Buffer {
  * fileExtract.ts — and folded in as labeled context). Extraction errors
  * become a visible, honest note rather than a silent failure or a pretended
  * success (see fileExtract.ts's ExtractedFile.error).
+ *
+ * fileExtract.ts is imported dynamically, ONLY when there's a non-image
+ * attachment to actually process — pdf-parse (and its native @napi-rs/canvas
+ * dependency), mammoth, xlsx and jszip never load at all for the overwhelming
+ * majority of turns (plain text, or image-only), which also means a plain
+ * chat message can't be taken down by a file-parsing dependency issue.
  */
 async function prepareAttachments(attachments: NexusAttachment[] | undefined) {
   const images: { dataUrl: string }[] = [];
   const fileContext: { fileName: string; text: string }[] = [];
   const extractionErrors: string[] = [];
 
+  const documents = (attachments ?? []).filter((att) => !att.mimeType.startsWith('image/'));
   for (const att of attachments ?? []) {
-    if (att.mimeType.startsWith('image/')) {
-      images.push({ dataUrl: att.dataUrl });
-      continue;
-    }
-    const buffer = dataUrlToBuffer(att.dataUrl);
-    const extracted = await extractDocumentText(att.name, att.mimeType, buffer);
-    if (!extracted) continue; // image type routed above, shouldn't normally happen here
-    if (extracted.error) {
-      extractionErrors.push(extracted.error);
-    } else {
-      fileContext.push({ fileName: extracted.name, text: extracted.text });
+    if (att.mimeType.startsWith('image/')) images.push({ dataUrl: att.dataUrl });
+  }
+
+  if (documents.length > 0) {
+    const { extractDocumentText } = await import('./fileExtract.js');
+    for (const att of documents) {
+      const buffer = dataUrlToBuffer(att.dataUrl);
+      const extracted = await extractDocumentText(att.name, att.mimeType, buffer);
+      if (!extracted) continue; // shouldn't happen — image types are already routed above
+      if (extracted.error) {
+        extractionErrors.push(extracted.error);
+      } else {
+        fileContext.push({ fileName: extracted.name, text: extracted.text });
+      }
     }
   }
 
