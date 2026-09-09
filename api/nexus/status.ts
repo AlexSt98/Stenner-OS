@@ -3,7 +3,11 @@
 // underlying provider logic (server/nexus/handlers.ts, server/providers).
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getProvider } from '../../server/providers/index.js';
-import { getNexusStatus } from '../../server/nexus/handlers.js';
+// Imported from ./status.js specifically, NOT from ./handlers.js — that
+// file pulls in document-parsing libraries (pdf-parse et al., one of which
+// has a native-addon dependency) that this trivial health check must never
+// depend on. See server/nexus/status.ts's header comment for why.
+import { getNexusStatus } from '../../server/nexus/status.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') {

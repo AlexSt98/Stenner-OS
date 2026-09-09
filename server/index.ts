@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import { getProvider } from './providers/index.js';
-import { getNexusStatus, isValidChatBody, streamNexusChat } from './nexus/handlers.js';
+import { getNexusStatus } from './nexus/status.js';
+import { isValidChatBody, streamNexusChat } from './nexus/handlers.js';
 
 // This Express server is NEXUS's local-dev backend only — Vite proxies
 // /api/* to it (see vite.config.ts). In production on Vercel, the same
