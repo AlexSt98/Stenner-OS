@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Sparkles, WifiOff, ExternalLink } from 'lucide-react';
+import { Send, WifiOff, ExternalLink } from 'lucide-react';
+import { NexusAvatar } from '../components/nexus/NexusAvatar';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuid } from 'uuid';
 import { useStore } from '../store/useStore';
@@ -129,11 +130,10 @@ export function NexusPage() {
 
   return (
     <div className="max-w-6xl mx-auto h-[calc(100vh-88px)] flex flex-col">
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-3 mb-3">
+        <NexusAvatar size={36} />
         <div>
-          <h1 className="text-[20px] font-bold flex items-center gap-2">
-            <Sparkles size={19} className="text-violet-400" /> NEXUS
-          </h1>
+          <h1 className="text-[20px] font-bold">NEXUS</h1>
           <p className="text-[12.5px] text-zinc-500 mt-0.5">The intelligence behind your workflow.</p>
         </div>
         {!status.connected && (
@@ -163,9 +163,7 @@ export function NexusPage() {
         <div className="stenner-card flex flex-col min-h-0 p-4">
           {!active || active.messages.length === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center mb-4">
-                <Sparkles size={26} className="text-white" />
-              </div>
+              <NexusAvatar size={96} glow className="mb-4" />
               <h2 className="text-[22px] font-bold">What do you want to figure out?</h2>
               <p className="text-[13px] text-zinc-500 mt-1.5 max-w-md">
                 Ask about your tasks, TEOPM workday, projects, calendar, English practice, or ideas — NEXUS reads STENNER OS's live data to answer.

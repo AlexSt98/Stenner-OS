@@ -17,6 +17,11 @@ dist-ssr
 .env.*
 !.env.example
 
+# Scratch folder for staging assets before they're copied into public/ —
+# also excluded from Vite's watcher in vite.config.ts (a file mid-write here
+# can crash it with EBUSY).
+Imagenes/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

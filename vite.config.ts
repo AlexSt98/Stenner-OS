@@ -13,5 +13,12 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    watch: {
+      // Imagenes/ is a personal scratch folder for staging assets before
+      // they're copied into public/ — it's not part of the served app, and
+      // a file mid-write there (cloud sync, a fresh screenshot, etc.) can
+      // hit an EBUSY lock that crashes Vite's watcher entirely. Ignore it.
+      ignored: ['**/Imagenes/**'],
+    },
   },
 })

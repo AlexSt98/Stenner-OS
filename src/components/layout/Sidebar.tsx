@@ -15,6 +15,7 @@ import {
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
+import { NexusAvatar } from '../nexus/NexusAvatar';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: Home, end: true },
@@ -63,8 +64,19 @@ export function Sidebar() {
               }`
             }
           >
-            <item.icon size={16} />
-            {item.label}
+            {({ isActive }) =>
+              item.to === '/nexus' && isActive ? (
+                <>
+                  <NexusAvatar size={18} />
+                  {item.label}
+                </>
+              ) : (
+                <>
+                  <item.icon size={16} />
+                  {item.label}
+                </>
+              )
+            }
           </NavLink>
         ))}
       </nav>
