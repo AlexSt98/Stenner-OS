@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { Response, ResponseInputItem, ResponseUsage, Tool as ResponsesTool } from 'openai/resources/responses/responses';
+import type { Response, ResponseFunctionToolCall, ResponseInputItem, ResponseUsage, Tool as ResponsesTool } from 'openai/resources/responses/responses';
 import {
   AIProvider,
   type ChatMessage,
@@ -10,10 +10,37 @@ import {
   type WebSource,
 } from './AIProvider.js';
 
-// "gpt-4o-mini" supports vision + the Responses API's hosted web_search and
-// image_generation tools — override via OPENAI_MODEL in .env for a
-// different model (e.g. "gpt-4o" for stronger multimodal quality).
+// "gpt-4o-mini" supports vision + the Responses API's hosted web_search tool
+// — override via OPENAI_MODEL in .env for a different model (e.g. "gpt-4o").
 const DEFAULT_MODEL = 'gpt-4o-mini';
+// "gpt-image-1" is OpenAI's current image-generation model, called directly
+// via the classic Images API (client.images.generate) — NOT the Responses
+// API's hosted `image_generation` tool, which requires "Verified
+// Organization" account status and 403s otherwise (confirmed against the
+// live API). The classic Images API works on a standard, unverified
+// account, so real image generation is implemented as a NEXUS function
+// tool that the server executes itself when the model calls it — see
+// generateImage() and the tool-execution loop in streamResponse() below.
+const IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+
+const IMAGE_GENERATION_TOOL: ResponsesTool = {
+  type: 'function',
+  name: 'image_generation',
+  description:
+    'Generate a real image from a text prompt. Call this DIRECTLY and IMMEDIATELY whenever the user asks to create, generate, design, draw, illustrate, sketch, mock up, or visualize an image, logo, banner, dashboard concept, moodboard, or any other visual — do not call web_search first or instead, an image request never needs research. NEXUS actually produces the image; never respond with only text claiming an image was made without calling this tool.',
+  parameters: {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: 'string',
+        description:
+          'A detailed, self-contained description of the image to generate. Fold in any style/mood direction the user gave (e.g. "more corporate", "less futuristic") rather than relying on prior turns.',
+      },
+    },
+    required: ['prompt'],
+  },
+  strict: null,
+};
 
 // NEXUS's ChatRole is 'user' | 'model' — the Responses API's EasyInputMessage
 // expects 'user' | 'assistant'. Plain string content is used unless the
@@ -55,11 +82,6 @@ function toFunctionTools(tools: GenerateRequest['tools']): ResponsesTool[] {
   }));
 }
 
-// OpenAI gates some hosted tools (image_generation in particular) behind
-// "Verified Organization" account status and 403s with this message when
-// it isn't verified — unrelated to API key validity or our request shape.
-const ORG_VERIFICATION_ERROR = /organization must be verified/i;
-
 function toUsage(usage: ResponseUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
   return {
@@ -69,10 +91,19 @@ function toUsage(usage: ResponseUsage | undefined): TokenUsage | undefined {
   };
 }
 
-/** Pulls out whatever the hosted tools actually produced — never fabricated, only present if the model's output really contains it. */
-function extractToolOutputs(response: Response): { sources?: WebSource[]; images?: string[]; toolCall?: GenerateResult['toolCall'] } {
+function addUsage(a: TokenUsage | undefined, b: TokenUsage | undefined): TokenUsage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+  };
+}
+
+/** Pulls out whatever the response actually contains — never fabricated, only present if the model's output really contains it. */
+function extractToolOutputs(response: Response): { sources?: WebSource[]; toolCall?: GenerateResult['toolCall'] } {
   const sources: WebSource[] = [];
-  const images: string[] = [];
   let toolCall: GenerateResult['toolCall'];
 
   for (const item of response.output) {
@@ -84,26 +115,25 @@ function extractToolOutputs(response: Response): { sources?: WebSource[]; images
           }
         }
       }
-    } else if (item.type === 'image_generation_call' && item.result) {
-      images.push(`data:image/png;base64,${item.result}`);
-    } else if (item.type === 'function_call' && !toolCall) {
-      // STENNER OS app-action tool (createTask, etc.) — only ever one per turn.
+    } else if (item.type === 'function_call' && item.name !== 'image_generation' && !toolCall) {
+      // A STENNER OS app-action tool (createTask, etc.) — only ever one per turn.
+      // image_generation is handled separately (see streamResponse) — it's
+      // executed for real here in the provider, never surfaced as a
+      // confirm/cancel toolCall the way app actions are.
       toolCall = { name: item.name, args: JSON.parse(item.arguments || '{}') as Record<string, unknown> };
     }
   }
 
-  return { sources: sources.length ? sources : undefined, images: images.length ? images : undefined, toolCall };
+  return { sources: sources.length ? sources : undefined, toolCall };
+}
+
+function findImageGenerationCall(response: Response): ResponseFunctionToolCall | undefined {
+  return response.output.find((o): o is ResponseFunctionToolCall => o.type === 'function_call' && o.name === 'image_generation');
 }
 
 export class OpenAIProvider extends AIProvider {
   readonly name = 'openai';
   private client: OpenAI | null;
-  // Once image_generation 403s for lack of org verification, stop requesting
-  // it for the rest of this process's lifetime instead of eating the same
-  // failure (and its latency) on every subsequent turn. web_search isn't
-  // included here — it's gated independently and shouldn't be disabled just
-  // because image_generation was.
-  private imageGenerationBlocked = false;
 
   constructor(private apiKey: string | undefined, private model = process.env.OPENAI_MODEL || DEFAULT_MODEL) {
     super();
@@ -121,50 +151,71 @@ export class OpenAIProvider extends AIProvider {
 
   /**
    * Builds the full tools array: STENNER OS's own app-action functions PLUS
-   * OpenAI's hosted web_search / image_generation tools when enabled. The
-   * model decides per-turn whether it needs any of these — NEXUS never
-   * classifies intent itself (see AIProvider.enableWebSearch/enableImageGeneration).
+   * NEXUS's real image_generation function tool and OpenAI's hosted
+   * web_search tool, when enabled. The model decides per-turn whether it
+   * needs any of these — NEXUS never classifies intent itself (see
+   * AIProvider.enableWebSearch/enableImageGeneration).
    */
-  private buildTools(request: GenerateRequest): ResponsesTool[] {
+  private buildTools(request: GenerateRequest, { includeImageGeneration = true } = {}): ResponsesTool[] {
     const tools = toFunctionTools(request.tools);
     if (request.enableWebSearch) tools.push({ type: 'web_search' });
-    if (request.enableImageGeneration && !this.imageGenerationBlocked) tools.push({ type: 'image_generation' });
+    if (request.enableImageGeneration && includeImageGeneration) tools.push(IMAGE_GENERATION_TOOL);
     return tools;
   }
 
-  /**
-   * Runs `create`, and if it fails specifically because image_generation
-   * requires a verified OpenAI organization, retries once without that tool
-   * — so a single unverified account setting doesn't take down every NEXUS
-   * conversation, only the image-generation capability itself.
-   */
-  private async withImageGenerationFallback<T>(tools: ResponsesTool[], create: (tools: ResponsesTool[]) => Promise<T>): Promise<T> {
-    const hasImageGeneration = tools.some((t) => t.type === 'image_generation');
+  /** Real call to OpenAI's Images API (client.images.generate) — not the gated Responses hosted tool. Throws with a clean, honest message on any failure. */
+  private async generateImage(prompt: string): Promise<{ dataUrl: string; usage?: TokenUsage }> {
     try {
-      return await create(tools);
+      const result = await this.requireClient().images.generate({ model: IMAGE_MODEL, prompt, size: '1024x1024' });
+      const b64 = result.data?.[0]?.b64_json;
+      if (!b64) throw new Error('Image API returned no image data.');
+      const usage = result.usage
+        ? { promptTokens: result.usage.input_tokens, completionTokens: result.usage.output_tokens, totalTokens: result.usage.total_tokens }
+        : undefined;
+      return { dataUrl: `data:image/png;base64,${b64}`, usage };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      if (!hasImageGeneration || !ORG_VERIFICATION_ERROR.test(message)) throw err;
-      this.imageGenerationBlocked = true;
-      console.warn(
-        '[nexus] OpenAI image_generation is unavailable for this account (organization not verified) — retrying without it. ' +
-          'Verify at https://platform.openai.com/settings/organization/general to enable it.'
-      );
-      return create(tools.filter((t) => t.type !== 'image_generation'));
+      // Full detail server-side only — the user gets one honest, plain sentence, never a stack trace or raw API error.
+      console.error('[nexus] image_generation (Images API) failed:', err);
+      throw new Error('Unable to generate image. Please try again.');
     }
   }
 
   async generateResponse(request: GenerateRequest): Promise<GenerateResult> {
-    const response = await this.withImageGenerationFallback(this.buildTools(request), (tools) =>
-      this.requireClient().responses.create({
+    const input = toResponsesInput(request.messages);
+    const response = await this.requireClient().responses.create({
+      model: this.model,
+      instructions: request.systemPrompt,
+      input,
+      tools: this.buildTools(request),
+    });
+
+    const imageCall = findImageGenerationCall(response);
+    if (!imageCall) {
+      const { sources, toolCall } = extractToolOutputs(response);
+      return { text: response.output_text, toolCall, usage: toUsage(response.usage), sources };
+    }
+
+    const { prompt } = JSON.parse(imageCall.arguments || '{}') as { prompt?: string };
+    try {
+      const image = await this.generateImage(prompt ?? '');
+      const followUp = await this.requireClient().responses.create({
         model: this.model,
         instructions: request.systemPrompt,
-        input: toResponsesInput(request.messages),
-        tools,
-      })
-    );
-    const { sources, images, toolCall } = extractToolOutputs(response);
-    return { text: response.output_text, toolCall, usage: toUsage(response.usage), sources, images };
+        input: [...input, imageCall, { type: 'function_call_output', call_id: imageCall.call_id, output: 'Image generated successfully.' }],
+        tools: this.buildTools(request, { includeImageGeneration: false }),
+      });
+      const { sources, toolCall } = extractToolOutputs(followUp);
+      return {
+        text: followUp.output_text,
+        toolCall,
+        usage: addUsage(addUsage(toUsage(response.usage), image.usage), toUsage(followUp.usage)),
+        sources,
+        images: [image.dataUrl],
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to generate image. Please try again.';
+      return { text: message, usage: toUsage(response.usage) };
+    }
   }
 
   async streamResponse(
@@ -172,22 +223,66 @@ export class OpenAIProvider extends AIProvider {
     onDelta: (delta: string) => void,
     onPhase?: (phase: 'searching' | 'generating_image') => void
   ): Promise<GenerateResult> {
-    const stream = await this.withImageGenerationFallback(this.buildTools(request), (tools) =>
-      this.requireClient().responses.create({
-        model: this.model,
-        instructions: request.systemPrompt,
-        input: toResponsesInput(request.messages),
-        tools,
-        stream: true,
-      })
+    const input = toResponsesInput(request.messages);
+    const first = await this.streamOnce(request.systemPrompt, input, this.buildTools(request), onDelta, onPhase);
+
+    const imageCall = findImageGenerationCall(first.response);
+    if (!imageCall) {
+      const { sources, toolCall } = extractToolOutputs(first.response);
+      return { text: first.fullText, toolCall, usage: toUsage(first.response.usage), sources };
+    }
+
+    onPhase?.('generating_image');
+    const { prompt } = JSON.parse(imageCall.arguments || '{}') as { prompt?: string };
+    let image: { dataUrl: string; usage?: TokenUsage };
+    try {
+      image = await this.generateImage(prompt ?? '');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to generate image. Please try again.';
+      onDelta(`\n\n${message}`);
+      const { sources, toolCall } = extractToolOutputs(first.response);
+      return { text: `${first.fullText}\n\n${message}`, toolCall, usage: toUsage(first.response.usage), sources };
+    }
+
+    // Feed the tool's real output back to the model so it can write a
+    // natural closing message alongside the image (e.g. "Here's your
+    // dashboard concept — let me know if you'd like it more corporate.").
+    const followUpInput: ResponseInputItem[] = [
+      ...input,
+      imageCall,
+      { type: 'function_call_output', call_id: imageCall.call_id, output: 'Image generated successfully.' },
+    ];
+    const second = await this.streamOnce(
+      request.systemPrompt,
+      followUpInput,
+      this.buildTools(request, { includeImageGeneration: false }),
+      onDelta,
+      onPhase
     );
 
+    const { sources, toolCall } = extractToolOutputs(second.response);
+    return {
+      text: first.fullText + second.fullText,
+      toolCall,
+      usage: addUsage(addUsage(toUsage(first.response.usage), image.usage), toUsage(second.response.usage)),
+      sources,
+      images: [image.dataUrl],
+    };
+  }
+
+  /** One streamed responses.create() call — text deltas go to onDelta, hosted-tool phases to onPhase, and the final Response (for tool-call/usage/citation extraction) is returned once the stream completes. */
+  private async streamOnce(
+    instructions: string,
+    input: ResponseInputItem[],
+    tools: ResponsesTool[],
+    onDelta: (delta: string) => void,
+    onPhase?: (phase: 'searching' | 'generating_image') => void
+  ): Promise<{ fullText: string; response: Response }> {
+    const stream = await this.requireClient().responses.create({ model: this.model, instructions, input, tools, stream: true });
+
     let fullText = '';
-    let result: GenerateResult = { text: '' };
-    // So each hosted tool only announces its phase once per turn, even
-    // though its "in progress" event can fire more than once.
+    let response: Response | undefined;
     let announcedSearching = false;
-    let announcedGeneratingImage = false;
 
     for await (const event of stream) {
       if (event.type === 'response.output_text.delta') {
@@ -196,19 +291,13 @@ export class OpenAIProvider extends AIProvider {
       } else if (event.type === 'response.web_search_call.searching' && !announcedSearching) {
         announcedSearching = true;
         onPhase?.('searching');
-      } else if (
-        (event.type === 'response.image_generation_call.in_progress' || event.type === 'response.image_generation_call.generating') &&
-        !announcedGeneratingImage
-      ) {
-        announcedGeneratingImage = true;
-        onPhase?.('generating_image');
       } else if (event.type === 'response.completed') {
-        const { sources, images, toolCall } = extractToolOutputs(event.response);
-        result = { text: fullText, toolCall, usage: toUsage(event.response.usage), sources, images };
+        response = event.response;
       }
     }
 
-    return { ...result, text: fullText };
+    if (!response) throw new Error('OpenAI stream ended without a completed response.');
+    return { fullText, response };
   }
 
   async generateStructuredOutput<T = unknown>({ systemPrompt, messages, responseSchema }: StructuredRequest): Promise<T> {
