@@ -31,12 +31,16 @@ export function BoardsPage() {
   const board = boards.find((b) => b.id === boardId) ?? boards[0];
   let colorCursor = 0;
   const nextColor = () => STICKY_COLORS[colorCursor++ % STICKY_COLORS.length];
+  const nextSpot = () => {
+    const n = board?.items.length ?? 0;
+    return { x: 60 + (n % 5) * 40, y: 60 + (n % 5) * 40 };
+  };
 
   const onFile = (file: File | undefined) => {
     if (!file || !board) return;
     const reader = new FileReader();
     reader.onload = () => {
-      addBoardItem(board.id, { type: 'image', content: reader.result as string, w: 220, h: 160, x: 100, y: 100 });
+      addBoardItem(board.id, { type: 'image', content: reader.result as string, w: 220, h: 160, ...nextSpot() });
     };
     reader.readAsDataURL(file);
   };
@@ -71,13 +75,13 @@ export function BoardsPage() {
         <div className="stenner-card p-3">
           <div className="flex items-center gap-2 mb-3 px-1">
             <span className="text-[13px] font-semibold text-zinc-300 mr-2">{board.name}</span>
-            <Button variant="secondary" size="sm" onClick={() => addBoardItem(board.id, { type: 'text', content: '', color: nextColor(), w: 220, h: 60 })}>
+            <Button variant="secondary" size="sm" onClick={() => addBoardItem(board.id, { type: 'text', content: '', color: nextColor(), w: 220, h: 60, ...nextSpot() })}>
               <Type size={13} /> Text
             </Button>
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => addBoardItem(board.id, { type: 'sticky', content: '', color: nextColor(), w: 180, h: 120 })}
+              onClick={() => addBoardItem(board.id, { type: 'sticky', content: '', color: nextColor(), w: 180, h: 120, ...nextSpot() })}
             >
               <StickyNote size={13} /> Sticky
             </Button>
@@ -89,7 +93,7 @@ export function BoardsPage() {
               size="sm"
               onClick={() => {
                 const name = prompt('Section name', 'New section');
-                if (name) addBoardItem(board.id, { type: 'section', content: name, color: nextColor(), w: 260, h: 200 });
+                if (name) addBoardItem(board.id, { type: 'section', content: name, color: nextColor(), w: 260, h: 200, ...nextSpot() });
               }}
             >
               <LayoutTemplate size={13} /> Section

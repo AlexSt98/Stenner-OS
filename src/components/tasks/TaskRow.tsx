@@ -8,14 +8,6 @@ import { fmtHM } from '../../lib/date';
 
 const STATUS_OPTIONS: TaskStatus[] = ['To Do', 'Today', 'In Progress', 'Review', 'Done'];
 
-const STATUS_DOT: Record<TaskStatus, string> = {
-  'To Do': 'bg-zinc-500',
-  Today: 'bg-green-400',
-  'In Progress': 'bg-blue-400',
-  Review: 'bg-violet-400',
-  Done: 'bg-zinc-600',
-};
-
 interface TaskRowProps {
   task: Task;
   onOpen: (task: Task) => void;
@@ -110,5 +102,3 @@ export function TaskRow({ task, onOpen, draggable = true }: TaskRowProps) {
     </div>
   );
 }
-
-export { STATUS_DOT };
