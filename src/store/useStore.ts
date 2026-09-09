@@ -33,6 +33,12 @@ import { nowISO, todayISO, yesterdayISO, calculateDuration } from '../lib/date';
 import { XP_PER_TASK } from '../lib/gamification';
 import { TEOPM_PROJECT_ID } from './selectors';
 import { googleCalendar } from '../lib/integrations';
+import { push, pullAll, subscribeRealtime } from '../lib/supabase/sync';
+
+// Not part of persisted state on purpose — a live subscription handle can't
+// be serialized, and re-subscribing on every reload (with a fresh userId
+// from AuthGate) is the correct behavior anyway.
+let realtimeUnsub: (() => void) | null = null;
 
 const EMPTY_TIMER: RunningTimer = {
   taskId: null,
@@ -75,6 +81,17 @@ interface StennerState {
   englishStats: EnglishStats;
   nexusConversations: NexusConversation[];
   nexusUsage: NexusUsage;
+
+  // ── Supabase sync (cloud is the source of truth when configured; this
+  // store + localStorage remain the offline cache regardless) ────────────
+  /** Set once the user is signed in via Supabase Auth (see AuthGate). Null = local-only, unauthenticated. */
+  supabaseUserId: string | null;
+  /** Pulls everything from Supabase and replaces local state with it, then (re)starts the Realtime subscription. */
+  hydrateFromSupabase: (userId: string) => Promise<void>;
+  /** Starts/refreshes the Realtime subscription for this user without a full re-pull. */
+  startRealtimeSync: (userId: string) => void;
+  /** Tears down the Realtime subscription and clears supabaseUserId (e.g. on sign-out). */
+  stopRealtimeSync: () => void;
 
   // ── Tasks ────────────────────────────────────────────────
   addTask: (input: Partial<Task> & { title: string }) => Task;
@@ -207,6 +224,89 @@ export const useStore = create<StennerState>()(
       englishStats: EMPTY_ENGLISH_STATS,
       nexusConversations: [],
       nexusUsage: EMPTY_NEXUS_USAGE,
+      supabaseUserId: null,
+
+      // ── Supabase sync ──────────────────────────────────────
+      hydrateFromSupabase: async (userId) => {
+        const snapshot = await pullAll();
+        set(() => ({
+          supabaseUserId: userId,
+          tasks: snapshot.tasks,
+          projects: snapshot.projects,
+          events: snapshot.events,
+          timeSessions: snapshot.timeSessions,
+          ideas: snapshot.ideas,
+          boards: snapshot.boards,
+          activities: snapshot.activities,
+          settings: snapshot.settings ?? get().settings,
+          englishSessions: snapshot.englishSessions,
+          englishStats: snapshot.englishStats ?? get().englishStats,
+          nexusConversations: snapshot.nexusConversations,
+        }));
+        get().startRealtimeSync(userId);
+      },
+
+      startRealtimeSync: (userId) => {
+        realtimeUnsub?.();
+        set(() => ({ supabaseUserId: userId }));
+        realtimeUnsub = subscribeRealtime(userId, {
+          onTask: (row, eventType) =>
+            set((s) => ({
+              tasks:
+                eventType === 'DELETE'
+                  ? s.tasks.filter((t) => t.id !== row.id)
+                  : s.tasks.some((t) => t.id === row.id)
+                    ? s.tasks.map((t) => (t.id === row.id ? row : t))
+                    : [row, ...s.tasks],
+            })),
+          onProject: (row, eventType) =>
+            set((s) => ({
+              projects:
+                eventType === 'DELETE'
+                  ? s.projects.filter((p) => p.id !== row.id)
+                  : s.projects.some((p) => p.id === row.id)
+                    ? s.projects.map((p) => (p.id === row.id ? row : p))
+                    : [row, ...s.projects],
+            })),
+          // Realtime only ever mirrors CalendarEvent rows that already exist in
+          // Postgres — nothing here creates one from a Task, preserving the
+          // Task/CalendarEvent independence rule (see types/index.ts).
+          onEvent: (row, eventType) =>
+            set((s) => ({
+              events:
+                eventType === 'DELETE'
+                  ? s.events.filter((e) => e.id !== row.id)
+                  : s.events.some((e) => e.id === row.id)
+                    ? s.events.map((e) => (e.id === row.id ? row : e))
+                    : [...s.events, row],
+            })),
+          onSession: (row, eventType) =>
+            set((s) => ({
+              timeSessions:
+                eventType === 'DELETE'
+                  ? s.timeSessions.filter((t) => t.id !== row.id)
+                  : s.timeSessions.some((t) => t.id === row.id)
+                    ? s.timeSessions.map((t) => (t.id === row.id ? row : t))
+                    : [row, ...s.timeSessions],
+            })),
+          onIdea: (row, eventType) =>
+            set((s) => ({
+              ideas:
+                eventType === 'DELETE'
+                  ? s.ideas.filter((i) => i.id !== row.id)
+                  : s.ideas.some((i) => i.id === row.id)
+                    ? s.ideas.map((i) => (i.id === row.id ? row : i))
+                    : [row, ...s.ideas],
+            })),
+          onSettings: (row) => set(() => ({ settings: row })),
+        });
+      },
+
+      stopRealtimeSync: () => {
+        realtimeUnsub?.();
+        realtimeUnsub = null;
+        set(() => ({ supabaseUserId: null }));
+      },
 
       // ── Tasks ────────────────────────────────────────────
       addTask: (input) => {
@@ -238,6 +338,8 @@ export const useStore = create<StennerState>()(
         }));
         // No Calendar/Google Calendar side effect here, by design — see the
         // Task/CalendarEvent independence note on Task in src/types/index.ts.
+        const uid = get().supabaseUserId;
+        if (uid) void push.task(task, uid);
         return task;
       },
 
@@ -256,6 +358,9 @@ export const useStore = create<StennerState>()(
         }));
         // No Calendar/Google Calendar side effect here, by design — see the
         // Task/CalendarEvent independence note on Task in src/types/index.ts.
+        const uid = get().supabaseUserId;
+        const updated = get().tasks.find((t) => t.id === id);
+        if (uid && updated) void push.task(updated, uid);
       },
 
       deleteTask: (id) => {
@@ -264,6 +369,8 @@ export const useStore = create<StennerState>()(
           tasks: s.tasks.filter((t) => t.id !== id),
           activities: task ? logActivityInto(s.activities, 'task_deleted', `Deleted task "${task.title}"`) : s.activities,
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteTask(id);
       },
 
       toggleTaskComplete: (id) => {
@@ -288,6 +395,9 @@ export const useStore = create<StennerState>()(
             willComplete ? `${task.title} marked as completed` : `${task.title} marked as incomplete`
           ),
         }));
+        const uid = get().supabaseUserId;
+        const updated = get().tasks.find((t) => t.id === id);
+        if (uid && updated) void push.task(updated, uid);
       },
 
       setTaskStatus: (id, status) => {
@@ -300,15 +410,21 @@ export const useStore = create<StennerState>()(
         if (status !== 'Done' && task.status === 'Done') {
           get().toggleTaskComplete(id);
           set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, status } : t)) }));
-          return;
+        } else {
+          set((s) => ({
+            tasks: s.tasks.map((t) => (t.id === id ? { ...t, status, updatedAt: nowISO() } : t)),
+          }));
         }
-        set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === id ? { ...t, status, updatedAt: nowISO() } : t)),
-        }));
+        const uid = get().supabaseUserId;
+        const updated = get().tasks.find((t) => t.id === id);
+        if (uid && updated) void push.task(updated, uid);
       },
 
       setTaskPriority: (id, priority) => {
         set((s) => ({ tasks: s.tasks.map((t) => (t.id === id ? { ...t, priority, updatedAt: nowISO() } : t)) }));
+        const uid = get().supabaseUserId;
+        const updated = get().tasks.find((t) => t.id === id);
+        if (uid && updated) void push.task(updated, uid);
       },
 
       reorderTasks: (draggedId, targetId) => {
@@ -339,6 +455,8 @@ export const useStore = create<StennerState>()(
           projects: [project, ...s.projects],
           activities: logActivityInto(s.activities, 'project_created', `Created project "${project.name}"`),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.project(project, uid);
         return project;
       },
 
@@ -347,6 +465,9 @@ export const useStore = create<StennerState>()(
           projects: s.projects.map((p) => (p.id === id ? { ...p, ...patch } : p)),
           activities: logActivityInto(s.activities, 'project_updated', `Updated project "${s.projects.find((p) => p.id === id)?.name ?? ''}"`),
         }));
+        const uid = get().supabaseUserId;
+        const updated = get().projects.find((p) => p.id === id);
+        if (uid && updated) void push.project(updated, uid);
       },
 
       deleteProject: (id) => {
@@ -354,6 +475,8 @@ export const useStore = create<StennerState>()(
           projects: s.projects.filter((p) => p.id !== id),
           tasks: s.tasks.map((t) => (t.projectId === id ? { ...t, projectId: null } : t)),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteProject(id);
       },
 
       // ── Calendar ─────────────────────────────────────────
@@ -375,15 +498,22 @@ export const useStore = create<StennerState>()(
           activities: logActivityInto(s.activities, 'event_created', `Created event "${event.title}"`),
         }));
         maybeSyncEventToGoogleCalendar(event);
+        const uid = get().supabaseUserId;
+        if (uid) void push.event(event, uid);
         return event;
       },
 
       updateEvent: (id, patch) => {
         set((s) => ({ events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+        const uid = get().supabaseUserId;
+        const updated = get().events.find((e) => e.id === id);
+        if (uid && updated) void push.event(updated, uid);
       },
 
       deleteEvent: (id) => {
         set((s) => ({ events: s.events.filter((e) => e.id !== id) }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteEvent(id);
       },
 
       scheduleTaskOnCalendar: (taskId, date, startTime, endTime) => {
@@ -465,6 +595,12 @@ export const useStore = create<StennerState>()(
               : s.tasks,
             activities: logActivityInto(s.activities, 'timer_stopped', `Stopped focus session — ${t.label} (${Math.round(totalSeconds / 60)}m)`),
           }));
+          const uid = get().supabaseUserId;
+          if (uid) {
+            void push.session(session, uid);
+            const updatedTask = t.taskId ? get().tasks.find((task) => task.id === t.taskId) : undefined;
+            if (updatedTask) void push.task(updatedTask, uid);
+          }
         }
         set(() => ({ timer: EMPTY_TIMER }));
       },
@@ -485,15 +621,22 @@ export const useStore = create<StennerState>()(
           ideas: [idea, ...s.ideas],
           activities: logActivityInto(s.activities, 'idea_added', `Added new idea to Ideas Vault — "${idea.title}"`),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.idea(idea, uid);
         return idea;
       },
 
       updateIdea: (id, patch) => {
         set((s) => ({ ideas: s.ideas.map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
+        const uid = get().supabaseUserId;
+        const updated = get().ideas.find((i) => i.id === id);
+        if (uid && updated) void push.idea(updated, uid);
       },
 
       deleteIdea: (id) => {
         set((s) => ({ ideas: s.ideas.filter((i) => i.id !== id) }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteIdea(id);
       },
 
       convertIdeaToTask: (id, overrides) => {
@@ -548,13 +691,23 @@ export const useStore = create<StennerState>()(
           boards: [...s.boards, board],
           activities: logActivityInto(s.activities, 'board_created', `Created board "${name}"`),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.board(board, uid);
         return board;
       },
 
-      deleteBoard: (id) => set((s) => ({ boards: s.boards.filter((b) => b.id !== id) })),
+      deleteBoard: (id) => {
+        set((s) => ({ boards: s.boards.filter((b) => b.id !== id) }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteBoard(id);
+      },
 
-      renameBoard: (id, name) =>
-        set((s) => ({ boards: s.boards.map((b) => (b.id === id ? { ...b, name } : b)) })),
+      renameBoard: (id, name) => {
+        set((s) => ({ boards: s.boards.map((b) => (b.id === id ? { ...b, name } : b)) }));
+        const uid = get().supabaseUserId;
+        const updated = get().boards.find((b) => b.id === id);
+        if (uid && updated) void push.board(updated, uid);
+      },
 
       addBoardItem: (boardId, item) => {
         const newItem: BoardItem = {
@@ -571,6 +724,8 @@ export const useStore = create<StennerState>()(
         set((s) => ({
           boards: s.boards.map((b) => (b.id === boardId ? { ...b, items: [...b.items, newItem] } : b)),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.boardItem(boardId, newItem, uid);
       },
 
       updateBoardItem: (boardId, itemId, patch) => {
@@ -579,12 +734,19 @@ export const useStore = create<StennerState>()(
             b.id === boardId ? { ...b, items: b.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it)) } : b
           ),
         }));
+        const uid = get().supabaseUserId;
+        const updatedItem = get()
+          .boards.find((b) => b.id === boardId)
+          ?.items.find((it) => it.id === itemId);
+        if (uid && updatedItem) void push.boardItem(boardId, updatedItem, uid);
       },
 
       deleteBoardItem: (boardId, itemId) => {
         set((s) => ({
           boards: s.boards.map((b) => (b.id === boardId ? { ...b, items: b.items.filter((it) => it.id !== itemId) } : b)),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteBoardItem(itemId);
       },
 
       // ── Settings ─────────────────────────────────────────
@@ -593,6 +755,8 @@ export const useStore = create<StennerState>()(
           settings: { ...s.settings, ...patch },
           activities: logActivityInto(s.activities, 'settings_updated', 'Updated settings'),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.settings(get().settings, uid);
       },
 
       resetDemoData: () => {
@@ -616,6 +780,8 @@ export const useStore = create<StennerState>()(
       // ── English Lab ──────────────────────────────────────
       addEnglishXp: (amount) => {
         set((s) => ({ settings: addXpOnly(s.settings, amount) }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.settings(get().settings, uid);
       },
 
       recordEnglishSession: (input) => {
@@ -642,10 +808,18 @@ export const useStore = create<StennerState>()(
               : `Practiced weak areas in English Lab — ${correct}/${input.exerciseIds.length}`
           ),
         }));
+        const uid = get().supabaseUserId;
+        if (uid) {
+          void push.englishSession(session, uid);
+          void push.englishStats(get().englishStats, uid);
+        }
         return session;
       },
 
       // ── NEXUS ──────────────────────────────────────────────
+      // Chat history sync only — GEMINI_API_KEY and the Gemini request/response
+      // path (server/providers, api/nexus/*) are completely untouched by this;
+      // Supabase only stores the conversation transcript, never the key.
       createNexusConversation: (title) => {
         const conversation: NexusConversation = {
           id: uuid(),
@@ -656,6 +830,8 @@ export const useStore = create<StennerState>()(
           contextUsed: [],
         };
         set((s) => ({ nexusConversations: [conversation, ...s.nexusConversations] }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.nexusConversation(conversation, uid);
         return conversation;
       },
 
@@ -672,6 +848,12 @@ export const useStore = create<StennerState>()(
               : c
           ),
         }));
+        const uid = get().supabaseUserId;
+        const updated = get().nexusConversations.find((c) => c.id === conversationId);
+        if (uid && updated) {
+          void push.nexusMessage(conversationId, message, uid);
+          void push.nexusConversation(updated, uid);
+        }
       },
 
       updateNexusMessage: (conversationId, messageId, patch) => {
@@ -682,14 +864,24 @@ export const useStore = create<StennerState>()(
               : c
           ),
         }));
+        const uid = get().supabaseUserId;
+        const updatedMessage = get()
+          .nexusConversations.find((c) => c.id === conversationId)
+          ?.messages.find((m) => m.id === messageId);
+        if (uid && updatedMessage) void push.nexusMessage(conversationId, updatedMessage, uid);
       },
 
       renameNexusConversation: (conversationId, title) => {
         set((s) => ({ nexusConversations: s.nexusConversations.map((c) => (c.id === conversationId ? { ...c, title } : c)) }));
+        const uid = get().supabaseUserId;
+        const updated = get().nexusConversations.find((c) => c.id === conversationId);
+        if (uid && updated) void push.nexusConversation(updated, uid);
       },
 
       deleteNexusConversation: (conversationId) => {
         set((s) => ({ nexusConversations: s.nexusConversations.filter((c) => c.id !== conversationId) }));
+        const uid = get().supabaseUserId;
+        if (uid) void push.deleteNexusConversation(conversationId);
       },
 
       recordNexusUsage: (usage) => {
