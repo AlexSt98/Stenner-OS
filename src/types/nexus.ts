@@ -22,6 +22,23 @@ export interface NexusToolCall {
   args: Record<string, unknown>;
 }
 
+/** A citation the model's hosted web-search tool actually returned — never fabricated by the frontend. */
+export interface NexusSource {
+  title: string;
+  url: string;
+}
+
+/** A file the user attached to a message — images go to vision, documents get server-side text extraction. */
+export interface NexusAttachment {
+  name: string;
+  mimeType: string;
+  /** data: URL as read via FileReader — only images additionally get a thumbnail preview. */
+  dataUrl: string;
+}
+
+/** Real-time phase of the current turn, reported by the backend as it actually happens — see lib/nexus/client.ts. */
+export type NexusPhase = 'thinking' | 'searching' | 'generating_image';
+
 export interface NexusMessage {
   id: string;
   role: NexusRole;
@@ -30,6 +47,12 @@ export interface NexusMessage {
   /** Set once the user has confirmed or cancelled a proposed action card. */
   toolCallResolution?: 'confirmed' | 'cancelled' | null;
   contextLabels?: string[]; // which context blocks were sent alongside this turn, for transparency
+  /** Files the USER attached to this message (user turns only). */
+  attachments?: NexusAttachment[];
+  /** Images the hosted image-generation tool actually produced this turn, as data: URLs. */
+  images?: string[];
+  /** Web citations the hosted web-search tool actually returned this turn. Absent unless it really ran. */
+  sources?: NexusSource[];
   timestamp: string;
 }
 

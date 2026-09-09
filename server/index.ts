@@ -8,7 +8,12 @@ import { getNexusStatus, isValidChatBody, streamNexusChat } from './nexus/handle
 // behavior is served by api/nexus/status.ts and api/nexus/chat.ts, which
 // call the exact same shared logic in ./nexus/handlers.ts.
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+// Raised from 1mb so a chat turn can carry a document/image attachment as a
+// base64 data: URL (see server/nexus/handlers.ts's NexusAttachment). Note:
+// this only matters for local dev — in production (Vercel Serverless
+// Functions, api/nexus/chat.ts) the platform's own ~4.5MB request body cap
+// applies regardless of anything configured here.
+app.use(express.json({ limit: '20mb' }));
 
 const PORT = Number(process.env.NEXUS_SERVER_PORT) || 8787;
 

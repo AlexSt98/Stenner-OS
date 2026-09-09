@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Send, WifiOff, ExternalLink } from 'lucide-react';
+import { Send, WifiOff, ExternalLink, Paperclip, X } from 'lucide-react';
 import { NexusAvatar } from '../components/nexus/NexusAvatar';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuid } from 'uuid';
 import { useStore } from '../store/useStore';
-import type { NexusMessage, NexusRole } from '../types/nexus';
+import { useToastStore } from '../store/useToastStore';
+import type { NexusAttachment, NexusMessage, NexusPhase, NexusRole } from '../types/nexus';
 import { nowISO } from '../lib/date';
 import { buildSystemPrompt } from '../lib/nexus/systemPrompt';
 import { fetchNexusStatus, streamNexusReply, type NexusStatus } from '../lib/nexus/client';
@@ -14,6 +15,20 @@ import { ThinkingIndicator } from '../components/nexus/ThinkingIndicator';
 import { QuickPrompts } from '../components/nexus/QuickPrompts';
 import { ConversationSidebar } from '../components/nexus/ConversationSidebar';
 import { ActionCard } from '../components/nexus/ActionCard';
+
+// Vercel Serverless Functions cap request bodies around ~4.5MB — attachments
+// are base64-encoded (≈33% larger than the raw file), so this keeps a
+// realistic margin rather than letting an upload silently fail in production.
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file.'));
+    reader.readAsDataURL(file);
+  });
+}
 
 function titleFromMessage(text: string) {
   const clean = text.trim().replace(/\s+/g, ' ');
@@ -46,11 +61,15 @@ export function NexusPage() {
   const deleteNexusConversation = useStore((s) => s.deleteNexusConversation);
   const recordNexusUsage = useStore((s) => s.recordNexusUsage);
 
+  const pushToast = useToastStore((s) => s.push);
   const [activeId, setActiveId] = useState<string | null>(conversations[0]?.id ?? null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<NexusStatus>({ connected: false, provider: 'openai' });
+  const [pendingAttachments, setPendingAttachments] = useState<NexusAttachment[]>([]);
+  const [phase, setPhase] = useState<NexusPhase>('thinking');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchNexusStatus().then(setStatus);
@@ -66,34 +85,74 @@ export function NexusPage() {
   }, [messageCount, lastMessageContent]);
 
   const historyForRequest = useMemo(
-    () => (active ? active.messages.filter((m) => m.content).map((m) => ({ role: m.role as NexusRole, content: m.content })) : []),
+    () =>
+      active
+        ? active.messages.filter((m) => m.content || (m.attachments && m.attachments.length > 0)).map((m) => ({ role: m.role as NexusRole, content: m.content }))
+        : [],
     [active]
   );
 
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const accepted: NexusAttachment[] = [];
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        pushToast(`"${file.name}" is too large (max ${Math.floor(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MB).`);
+        continue;
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        accepted.push({ name: file.name, mimeType: file.type || 'application/octet-stream', dataUrl });
+      } catch {
+        pushToast(`Couldn't read "${file.name}".`);
+      }
+    }
+    if (accepted.length > 0) setPendingAttachments((prev) => [...prev, ...accepted]);
+  };
+
+  const removePendingAttachment = (index: number) => {
+    setPendingAttachments((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const send = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if ((!trimmed && pendingAttachments.length === 0) || sending) return;
 
     let conversationId = activeId;
     if (!conversationId) {
-      const conv = createNexusConversation(titleFromMessage(trimmed));
+      const conv = createNexusConversation(titleFromMessage(trimmed || pendingAttachments[0]?.name || 'New conversation'));
       conversationId = conv.id;
       setActiveId(conv.id);
     } else if (active && active.messages.length === 0) {
-      renameNexusConversation(conversationId, titleFromMessage(trimmed));
+      renameNexusConversation(conversationId, titleFromMessage(trimmed || pendingAttachments[0]?.name || 'New conversation'));
     }
 
-    const userMessage: NexusMessage = { id: uuid(), role: 'user', content: trimmed, timestamp: nowISO() };
+    const attachments = pendingAttachments;
+    const userMessage: NexusMessage = {
+      id: uuid(),
+      role: 'user',
+      content: trimmed,
+      attachments: attachments.length ? attachments : undefined,
+      timestamp: nowISO(),
+    };
     appendNexusMessage(conversationId, userMessage);
     setInput('');
+    setPendingAttachments([]);
+    setPhase('thinking');
     setSending(true);
 
     const { prompt, contextLabels } = buildSystemPrompt(trimmed);
     const modelMessageId = uuid();
     appendNexusMessage(conversationId, { id: modelMessageId, role: 'model', content: '', contextLabels, timestamp: nowISO() });
 
-    const finish = (text: string, toolCall?: NexusMessage['toolCall']) => {
-      updateNexusMessage(conversationId!, modelMessageId, { content: text, toolCall: toolCall ?? null, toolCallResolution: toolCall ? undefined : null });
+    const finish = (text: string, toolCall?: NexusMessage['toolCall'], sources?: NexusMessage['sources'], images?: NexusMessage['images']) => {
+      updateNexusMessage(conversationId!, modelMessageId, {
+        content: text,
+        toolCall: toolCall ?? null,
+        toolCallResolution: toolCall ? undefined : null,
+        sources,
+        images,
+      });
       setSending(false);
     };
 
@@ -116,13 +175,15 @@ export function NexusPage() {
       const result = await streamNexusReply({
         systemPrompt: prompt,
         history: [...historyForRequest, { role: 'user', content: trimmed }],
+        attachments: attachments.length ? attachments : undefined,
         onDelta: (delta) => {
           acc += delta;
           updateNexusMessage(conversationId!, modelMessageId, { content: acc });
         },
+        onPhase: setPhase,
       });
       if (result.usage) recordNexusUsage(result.usage);
-      finish(result.text, result.toolCall);
+      finish(result.text, result.toolCall, result.sources, result.images);
     } catch (err) {
       finish(err instanceof Error ? `⚠️ ${err.message}` : '⚠️ Something went wrong talking to NEXUS.');
     }
@@ -189,7 +250,7 @@ export function NexusPage() {
                   }
                 />
               ))}
-              {sending && active.messages[active.messages.length - 1]?.content === '' && <ThinkingIndicator />}
+              {sending && active.messages[active.messages.length - 1]?.content === '' && <ThinkingIndicator phase={phase} />}
             </div>
           )}
 
@@ -199,7 +260,42 @@ export function NexusPage() {
                 <QuickPrompts onSelect={send} disabled={sending} />
               </div>
             )}
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {pendingAttachments.map((a, i) => (
+                  <span
+                    key={i}
+                    className="flex items-center gap-1.5 pl-2.5 pr-1.5 py-1.5 rounded-lg bg-white/[0.06] border border-white/10 text-[11.5px] text-zinc-300 max-w-[220px]"
+                  >
+                    <Paperclip size={11} className="shrink-0" />
+                    <span className="truncate">{a.name}</span>
+                    <button onClick={() => removePendingAttachment(i)} className="shrink-0 p-0.5 rounded hover:bg-white/10 text-zinc-500 hover:text-white">
+                      <X size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                className="hidden"
+                onChange={(e) => {
+                  void handleFilesSelected(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending}
+                title="Attach a file or image"
+                className="p-2.5 rounded-xl border border-white/10 hover:bg-white/[0.06] disabled:opacity-40 disabled:pointer-events-none text-zinc-400 hover:text-white transition-colors shrink-0"
+              >
+                <Paperclip size={16} />
+              </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -215,7 +311,7 @@ export function NexusPage() {
               />
               <button
                 onClick={() => send(input)}
-                disabled={!input.trim() || sending}
+                disabled={(!input.trim() && pendingAttachments.length === 0) || sending}
                 className="p-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:pointer-events-none text-white transition-colors shrink-0"
               >
                 <Send size={16} />
