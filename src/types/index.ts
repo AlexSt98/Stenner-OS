@@ -29,14 +29,45 @@ export interface Task {
   priority: Priority;
   status: TaskStatus;
   dueDate: string | null; // ISO date, e.g. 2026-09-08
-  dueTime: string | null; // HH:mm, optional — lets a task become a calendar block
+  /**
+   * HH:mm — the clock-in / start time for TEOPM's manual time log.
+   * Deliberately NOT a calendar concept: setting this (with endTime) never
+   * creates or implies a CalendarEvent. A Task only reaches Calendar through
+   * an explicit "Add to Calendar" action (see addEvent in store/useStore.ts)
+   * — see the Task/CalendarEvent independence note below.
+   */
+  dueTime: string | null;
+  endTime: string | null; // HH:mm — the clock-out / end time. Paired with dueTime for TEOPM/WORK time logging.
   estimatedMinutes: number;
-  actualMinutes: number; // accumulated from linked TimeSessions
+  actualMinutes: number; // accumulated from linked TimeSessions (Time Tracker) — unrelated to TEOPM's start/end duration
+  /**
+   * Minutes between dueTime and endTime — the SOURCE VALUE for TEOPM/WORK
+   * time logging (see isTeopmWorkTask/teopmWorkedMinutes in store/selectors.ts).
+   * Always derived via lib/date.ts's calculateDuration() inside
+   * addTask/updateTask, never set by hand — null until both times are set.
+   * durationHours is deliberately NOT stored: it's always durationMinutes / 60,
+   * computed on read (see selectors.toDecimalHours) so it can never drift.
+   */
+  durationMinutes: number | null;
   tags: string[];
   createdAt: string; // ISO datetime
   completedAt: string | null;
   updatedAt: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Task ≠ CalendarEvent — deliberately independent entities.
+//
+// TEOPM reads dueDate/dueTime/endTime/tags/projectId off a Task purely to
+// compute worked hours; nothing in that path ever reads or writes
+// CalendarEvent, and nothing auto-creates one. A CalendarEvent only comes
+// from: (a) a user manually creating one on the Calendar page, or (b) an
+// explicit "Add to Calendar" action on a task (addEvent({..., taskId})) —
+// never as a side effect of a task simply having a date/start/end/tag.
+// Google Calendar sync (lib/integrations/index.ts's googleCalendar,
+// CalendarEvent.source) follows the same rule: it syncs CalendarEvents only,
+// never Tasks directly, so a TEOPM/WORK task is never pushed automatically.
+// ─────────────────────────────────────────────────────────────────────────
 
 export interface Project {
   id: string;
@@ -161,13 +192,14 @@ export interface RunningTimer {
 // TEOPM Workday
 //
 // Deliberately NOT a parallel task system: a "workday task" is just a Task
-// with projectId === the TEOPM project. dueDate is the workday date, dueTime
-// is the start time, estimatedMinutes/actualMinutes are planned/actual
-// duration — every field already exists on Task. This type documents the
+// that carries a `TEOPM` or `WORK` tag (or, for backward compatibility, sits
+// on the TEOPM project) — see isTeopmWorkTask() in store/selectors.ts. No
+// timer involved: dueDate is the workday date, dueTime/endTime are the
+// clock-in/clock-out times, and durationMinutes (derived from them) is the
+// worked time — every field already exists on Task. This type documents the
 // shape the daily 8h rollup is derived from; it is computed by a selector
 // (see store/selectors.ts) rather than persisted, so history for past days
-// falls out of the existing Task/TimeSession records for free — nothing to
-// keep in sync.
+// falls out of the existing Task records for free — nothing to keep in sync.
 // ─────────────────────────────────────────────────────────────────────────
 export interface DailyWorkday {
   date: string; // ISO date

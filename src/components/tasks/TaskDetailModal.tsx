@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Play, Pencil, Check, Trash2, Calendar, Clock3, Tag } from 'lucide-react';
+import { Play, Pencil, Check, Trash2, Calendar, Clock3, Tag, CalendarPlus } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { PriorityBadge, StatusBadge, CategoryChip } from '../common/Badges';
 import { useStore } from '../../store/useStore';
 import { useToastStore } from '../../store/useToastStore';
 import type { Task } from '../../types';
-import { fmtHM, fmtDateShort } from '../../lib/date';
+import { fmtHM, fmtDateShort, fmtTime12h } from '../../lib/date';
+import { isTeopmWorkTask, toDecimalHours } from '../../store/selectors';
 import { TaskFormModal } from './TaskFormModal';
 
 interface TaskDetailModalProps {
@@ -21,12 +22,15 @@ export function TaskDetailModal({ task, onClose, renderEditModal }: TaskDetailMo
   const startTimer = useStore((s) => s.startTimer);
   const toggleTaskComplete = useStore((s) => s.toggleTaskComplete);
   const deleteTask = useStore((s) => s.deleteTask);
+  const addEvent = useStore((s) => s.addEvent);
   const pushToast = useToastStore((s) => s.push);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   if (!task) return null;
   const project = projects.find((p) => p.id === task.projectId);
+  // Only offer it once there's an actual start/end block to put on the calendar — never automatic either way.
+  const canAddToCalendar = !!(task.dueDate && task.dueTime && task.endTime);
 
   const handleStartTimer = () => {
     startTimer({
@@ -37,6 +41,22 @@ export function TaskDetailModal({ task, onClose, renderEditModal }: TaskDetailMo
     });
     pushToast('Timer started');
     onClose();
+  };
+
+  // The ONLY path from a Task to a CalendarEvent — fires solely on this explicit click,
+  // never automatically from a task simply having a date/start/end/tag/project.
+  const handleAddToCalendar = () => {
+    if (!task.dueDate || !task.dueTime || !task.endTime) return;
+    addEvent({
+      title: task.title,
+      date: task.dueDate,
+      startTime: task.dueTime,
+      endTime: task.endTime,
+      color: project?.color,
+      taskId: task.id,
+      projectId: task.projectId,
+    });
+    pushToast('Added to Calendar');
   };
 
   const handleComplete = () => {
@@ -58,6 +78,15 @@ export function TaskDetailModal({ task, onClose, renderEditModal }: TaskDetailMo
               <Trash2 size={13} /> Delete
             </Button>
             <div className="flex-1" />
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleAddToCalendar}
+              disabled={!canAddToCalendar}
+              title={canAddToCalendar ? 'Create a Calendar event for this block' : 'Set a start and end time first'}
+            >
+              <CalendarPlus size={13} /> Add to Calendar
+            </Button>
             <Button variant="secondary" size="sm" onClick={handleStartTimer}>
               <Play size={13} /> Start timer
             </Button>
@@ -93,16 +122,29 @@ export function TaskDetailModal({ task, onClose, renderEditModal }: TaskDetailMo
                 <Calendar size={12} /> Due date
               </div>
               <div className="text-[13px] font-medium">
-                {task.dueDate ? fmtDateShort(task.dueDate) : '—'} {task.dueTime ? `· ${task.dueTime}` : ''}
+                {task.dueDate ? fmtDateShort(task.dueDate) : '—'} {task.dueTime ? `· ${fmtTime12h(task.dueTime)}` : ''}
               </div>
             </div>
             <div className="stenner-card px-3 py-2.5">
               <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mb-1">
-                <Clock3 size={12} /> Time
+                <Clock3 size={12} /> {isTeopmWorkTask(task) ? 'Logged (TEOPM)' : 'Time'}
               </div>
-              <div className="text-[13px] font-medium">
-                {fmtHM(task.actualMinutes)} <span className="text-zinc-500">/ {fmtHM(task.estimatedMinutes)} est.</span>
-              </div>
+              {isTeopmWorkTask(task) ? (
+                <div className="text-[13px] font-medium tabular-nums">
+                  {task.dueTime && task.endTime ? (
+                    <>
+                      {fmtTime12h(task.dueTime)} → {fmtTime12h(task.endTime)}{' '}
+                      <span className="text-zinc-500">· {toDecimalHours(task.durationMinutes ?? 0)} HRS</span>
+                    </>
+                  ) : (
+                    <span className="text-zinc-500">-- (no start/end set yet)</span>
+                  )}
+                </div>
+              ) : (
+                <div className="text-[13px] font-medium">
+                  {fmtHM(task.actualMinutes)} <span className="text-zinc-500">/ {fmtHM(task.estimatedMinutes)} est.</span>
+                </div>
+              )}
             </div>
           </div>
 

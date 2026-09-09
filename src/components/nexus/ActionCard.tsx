@@ -25,13 +25,17 @@ function fieldsFor(call: NexusToolCall): { label: string; value: string }[] {
         { label: 'Project', value: s(a.projectName) ?? 'None' },
         { label: 'Priority', value: s(a.priority) ?? 'Medium' },
         { label: 'Due', value: s(a.dueDate) ?? 'Today' },
-      ].filter((f) => f.value);
+        { label: 'Time', value: a.dueTime && a.endTime ? `${s(a.dueTime)} – ${s(a.endTime)}` : (s(a.dueTime) ?? '') },
+        { label: 'Tags', value: s(a.tags) ?? '' },
+      ].filter((f): f is { label: string; value: string } => !!f.value);
     case 'updateTask':
       return [
         { label: 'Task', value: s(a.taskTitle) ?? '—' },
-        { label: 'Priority', value: s(a.priority) },
-        { label: 'Status', value: s(a.status) },
-        { label: 'Due', value: s(a.dueDate) },
+        { label: 'Priority', value: s(a.priority) ?? '' },
+        { label: 'Status', value: s(a.status) ?? '' },
+        { label: 'Due', value: s(a.dueDate) ?? '' },
+        { label: 'Time', value: a.dueTime && a.endTime ? `${s(a.dueTime)} – ${s(a.endTime)}` : (s(a.dueTime) ?? '') },
+        { label: 'Tags', value: s(a.tags) ?? '' },
       ].filter((f): f is { label: string; value: string } => !!f.value);
     case 'completeTask':
       return [{ label: 'Task', value: s(a.taskTitle) ?? '—' }];

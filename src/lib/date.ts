@@ -81,3 +81,35 @@ export function fmtHM(totalMinutes: number) {
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Start-time / end-time duration — the single source of truth TEOPM (and any
+// other "clock in / clock out" entry) derives its worked minutes from. Both
+// times are "HH:mm" 24h strings (native <input type="time"> value format),
+// so AM/PM is already resolved before it reaches here.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Minutes between two "HH:mm" times. Returns null when either side is
+ * missing/unset — that's the "no time logged yet" state, distinct from a
+ * real 0-minute duration. An end time earlier than the start time is
+ * treated as crossing midnight (wraps by adding 24h) rather than going
+ * negative.
+ */
+export function calculateDuration(startTime: string | null | undefined, endTime: string | null | undefined): number | null {
+  if (!startTime || !endTime) return null;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return null;
+  let minutes = eh * 60 + em - (sh * 60 + sm);
+  if (minutes < 0) minutes += 24 * 60; // crossed midnight
+  return minutes;
+}
+
+/** "14:00" -> "2:00 PM" — for displaying a stored 24h time the way people read it. */
+export function fmtTime12h(hhmm: string | null | undefined) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return '';
+  return format(new Date(2000, 0, 1, h, m), 'h:mm a');
+}

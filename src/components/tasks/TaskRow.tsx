@@ -4,7 +4,8 @@ import type { Task, TaskStatus } from '../../types';
 import { useStore } from '../../store/useStore';
 import { useToastStore } from '../../store/useToastStore';
 import { PriorityBadge, CategoryChip } from '../common/Badges';
-import { fmtHM } from '../../lib/date';
+import { fmtHM, fmtTime12h } from '../../lib/date';
+import { isTeopmWorkTask, toDecimalHours } from '../../store/selectors';
 
 const STATUS_OPTIONS: TaskStatus[] = ['To Do', 'Today', 'In Progress', 'Review', 'Done'];
 
@@ -81,10 +82,28 @@ export function TaskRow({ task, onOpen, draggable = true }: TaskRowProps) {
 
       <PriorityBadge priority={task.priority} />
 
-      <div className="hidden sm:flex items-center gap-1 text-[11.5px] text-zinc-500 w-14 shrink-0">
-        <Clock3 size={11} />
-        {fmtHM(task.estimatedMinutes)}
-      </div>
+      {isTeopmWorkTask(task) ? (
+        <div className="hidden sm:flex items-center gap-1 text-[11.5px] text-zinc-500 w-[132px] shrink-0 justify-end tabular-nums" title="Start → end · logged hours">
+          {task.dueTime && task.endTime ? (
+            <>
+              <Clock3 size={11} className="shrink-0" />
+              <span className="truncate">
+                {fmtTime12h(task.dueTime)} → {fmtTime12h(task.endTime)} · {toDecimalHours(task.durationMinutes ?? 0)} HRS
+              </span>
+            </>
+          ) : (
+            <>
+              <Clock3 size={11} className="shrink-0" />
+              <span>--</span>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="hidden sm:flex items-center gap-1 text-[11.5px] text-zinc-500 w-14 shrink-0">
+          <Clock3 size={11} />
+          {fmtHM(task.estimatedMinutes)}
+        </div>
+      )}
 
       <select
         value={task.status}

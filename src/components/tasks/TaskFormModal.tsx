@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Label, TextInput, TextArea, Select, FieldRow } from '../common/Fields';
 import { Button } from '../common/Button';
 import { useStore } from '../../store/useStore';
 import type { Task, Priority, TaskStatus } from '../../types';
-import { todayISO } from '../../lib/date';
+import { todayISO, calculateDuration, fmtTime12h } from '../../lib/date';
+import { toDecimalHours } from '../../store/selectors';
 
 const CATEGORIES = ['Design', 'Marketing', 'Meetings', 'Admin', 'Content', 'Personal', 'General'];
 
@@ -28,8 +30,16 @@ export function TaskFormModal({ open, onClose, task, defaultStatus }: TaskFormMo
   const [status, setStatus] = useState<TaskStatus>('To Do');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [estimatedMinutes, setEstimatedMinutes] = useState(30);
   const [tags, setTags] = useState('');
+
+  const isWorkTagged = useMemo(
+    () => tags.split(',').some((t) => ['TEOPM', 'WORK'].includes(t.trim().toUpperCase())),
+    [tags]
+  );
+  // Live preview — same calculateDuration() the store recomputes on save, so this never drifts from the saved value.
+  const durationMinutes = useMemo(() => calculateDuration(dueTime || null, endTime || null), [dueTime, endTime]);
 
   useEffect(() => {
     if (!open) return;
@@ -42,6 +52,7 @@ export function TaskFormModal({ open, onClose, task, defaultStatus }: TaskFormMo
       setStatus(task.status);
       setDueDate(task.dueDate ?? '');
       setDueTime(task.dueTime ?? '');
+      setEndTime(task.endTime ?? '');
       setEstimatedMinutes(task.estimatedMinutes);
       setTags(task.tags.join(', '));
     } else {
@@ -53,6 +64,7 @@ export function TaskFormModal({ open, onClose, task, defaultStatus }: TaskFormMo
       setStatus(defaultStatus ?? 'To Do');
       setDueDate(todayISO());
       setDueTime('');
+      setEndTime('');
       setEstimatedMinutes(30);
       setTags('');
     }
@@ -69,6 +81,7 @@ export function TaskFormModal({ open, onClose, task, defaultStatus }: TaskFormMo
       status,
       dueDate: dueDate || null,
       dueTime: dueTime || null,
+      endTime: endTime || null,
       estimatedMinutes: Number(estimatedMinutes) || 0,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
     };
@@ -164,27 +177,53 @@ export function TaskFormModal({ open, onClose, task, defaultStatus }: TaskFormMo
             <TextInput type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
           <div>
-            <Label>Due time (optional)</Label>
-            <TextInput type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} />
+            <Label>Tags (comma separated)</Label>
+            <TextInput value={tags} onChange={(e) => setTags(e.target.value)} placeholder="logo, branding" />
           </div>
         </FieldRow>
 
         <FieldRow>
           <div>
-            <Label>Estimated time (minutes)</Label>
-            <TextInput
-              type="number"
-              min={0}
-              step={5}
-              value={estimatedMinutes}
-              onChange={(e) => setEstimatedMinutes(Number(e.target.value))}
-            />
+            <Label>Start time (optional)</Label>
+            <TextInput type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} />
           </div>
           <div>
-            <Label>Tags (comma separated)</Label>
-            <TextInput value={tags} onChange={(e) => setTags(e.target.value)} placeholder="logo, branding" />
+            <Label>End time (optional)</Label>
+            <TextInput type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
           </div>
         </FieldRow>
+
+        {/* Only relevant once the task is tagged TEOPM/WORK — that's what actually feeds the workday total. */}
+        {isWorkTagged && (
+          <div
+            className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-[13px] font-medium ${
+              durationMinutes !== null ? 'border-violet-500/25 bg-violet-500/[0.06] text-violet-300' : 'border-white/10 bg-white/[0.02] text-zinc-500'
+            }`}
+          >
+            {dueTime && endTime ? (
+              <>
+                <span>{fmtTime12h(dueTime)}</span>
+                <ArrowRight size={13} />
+                <span>{fmtTime12h(endTime)}</span>
+                <span className="ml-auto tabular-nums">{toDecimalHours(durationMinutes ?? 0)} HRS · counts toward TEOPM</span>
+              </>
+            ) : (
+              <span>Tagged TEOPM/WORK — set both times to log hours toward the TEOPM workday total.</span>
+            )}
+          </div>
+        )}
+
+        <div>
+          <Label>Estimated time (minutes)</Label>
+          <TextInput
+            type="number"
+            min={0}
+            step={5}
+            value={estimatedMinutes}
+            onChange={(e) => setEstimatedMinutes(Number(e.target.value))}
+            className="w-32"
+          />
+        </div>
       </div>
     </Modal>
   );

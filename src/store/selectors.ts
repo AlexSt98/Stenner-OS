@@ -56,29 +56,41 @@ export function secondsByCategory(sessions: TimeSession[], range: 'today' | 'wee
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// TEOPM Workday — a "workday task" is just a Task on the TEOPM project.
-// Nothing new is persisted; the 8h rollup for any date (past or present)
-// falls out of the existing Task records.
+// TEOPM Workday — a "workday task" is any Task tagged TEOPM/WORK (or, for
+// backward compatibility with tasks created before tag-based detection
+// existed, one filed on the TEOPM project). No timer involved: the worked
+// total for a day sums each task's durationMinutes — derived from its
+// dueTime (start) and endTime (end) via calculateDuration(), never from a
+// running/stopped timer — so nothing here double-counts Time Tracker
+// sessions. Nothing new is persisted beyond the Task fields themselves; the
+// 8h rollup for any date (past or present) falls out of the existing Task
+// records.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const TEOPM_PROJECT_ID = 'proj-teopm';
-export const WORKDAY_TARGET_MINUTES = 480; // 8h
+export const WORKDAY_TARGET_MINUTES = 480; // 8h — a goal, not a cap: logged time is never clamped to it.
+const TEOPM_WORK_TAGS = new Set(['TEOPM', 'WORK']);
+
+/** A task counts toward TEOPM the moment it carries a TEOPM/WORK tag (case-insensitive) — no project assignment required. */
+export function isTeopmWorkTask(task: Task) {
+  return task.projectId === TEOPM_PROJECT_ID || task.tags.some((tag) => TEOPM_WORK_TAGS.has(tag.trim().toUpperCase()));
+}
 
 export function teopmTasksForDate(tasks: Task[], date: string) {
-  return tasks.filter((t) => t.projectId === TEOPM_PROJECT_ID && t.dueDate === date);
+  return tasks.filter((t) => isTeopmWorkTask(t) && t.dueDate === date);
 }
 
 export function teopmWorkedMinutes(tasks: Task[], date: string) {
-  return teopmTasksForDate(tasks, date).reduce((sum, t) => sum + t.actualMinutes, 0);
+  return teopmTasksForDate(tasks, date).reduce((sum, t) => sum + (t.durationMinutes ?? 0), 0);
 }
 
 export function teopmDayStats(tasks: Task[], date: string) {
   const dayTasks = teopmTasksForDate(tasks, date);
-  const workedMinutes = dayTasks.reduce((sum, t) => sum + t.actualMinutes, 0);
+  const workedMinutes = dayTasks.reduce((sum, t) => sum + (t.durationMinutes ?? 0), 0);
   const tasksCompleted = dayTasks.filter((t) => t.status === 'Done').length;
   return {
     date,
-    workedMinutes,
+    workedMinutes, // can exceed targetMinutes — 8h is a goal, not a limit
     targetMinutes: WORKDAY_TARGET_MINUTES,
     tasksCompleted,
     tasksTotal: dayTasks.length,

@@ -29,8 +29,10 @@ import {
   SEED_ACTIVITIES,
   SEED_SETTINGS,
 } from './seed';
-import { nowISO, todayISO, yesterdayISO } from '../lib/date';
+import { nowISO, todayISO, yesterdayISO, calculateDuration } from '../lib/date';
 import { XP_PER_TASK } from '../lib/gamification';
+import { TEOPM_PROJECT_ID } from './selectors';
+import { googleCalendar } from '../lib/integrations';
 
 const EMPTY_TIMER: RunningTimer = {
   taskId: null,
@@ -172,6 +174,23 @@ function bumpEnglishStreak(stats: EnglishStats): EnglishStats {
   return { streak: wasYesterday ? stats.streak + 1 : 1, lastPracticeDate: today };
 }
 
+/**
+ * Google Calendar sync hook — architecture placeholder only (see
+ * lib/integrations/index.ts's googleCalendar). Inert until connected: no
+ * OAuth exists yet, so this only fires once `integrations.googleCalendar.
+ * connected` is true, which never happens today.
+ *
+ * Deliberately hangs off CalendarEvent, never Task — TEOPM/WORK tasks must
+ * NOT sync to Google Calendar just because they carry a date/start/end.
+ * Only a real CalendarEvent (created manually, or via an explicit
+ * "Add to Calendar" action on a task) is eligible to sync.
+ */
+function maybeSyncEventToGoogleCalendar(_event: CalendarEvent) {
+  const { settings } = useStore.getState();
+  if (!settings.integrations.googleCalendar.connected) return;
+  void googleCalendar.push(); // real push (using _event's fields) lands once OAuth exists
+}
+
 export const useStore = create<StennerState>()(
   persist(
     (set, get) => ({
@@ -191,6 +210,8 @@ export const useStore = create<StennerState>()(
 
       // ── Tasks ────────────────────────────────────────────
       addTask: (input) => {
+        const dueTime = input.dueTime ?? null;
+        const endTime = input.endTime ?? null;
         const task: Task = {
           id: uuid(),
           title: input.title,
@@ -200,9 +221,12 @@ export const useStore = create<StennerState>()(
           priority: input.priority ?? 'Medium',
           status: input.status ?? 'To Do',
           dueDate: input.dueDate ?? null,
-          dueTime: input.dueTime ?? null,
+          dueTime,
+          endTime,
           estimatedMinutes: input.estimatedMinutes ?? 30,
           actualMinutes: 0,
+          // Always derived, never taken from the caller — see the field's doc comment on Task.
+          durationMinutes: calculateDuration(dueTime, endTime),
           tags: input.tags ?? [],
           createdAt: nowISO(),
           completedAt: null,
@@ -212,14 +236,26 @@ export const useStore = create<StennerState>()(
           tasks: [task, ...s.tasks],
           activities: logActivityInto(s.activities, 'task_created', `Created task "${task.title}"`),
         }));
+        // No Calendar/Google Calendar side effect here, by design — see the
+        // Task/CalendarEvent independence note on Task in src/types/index.ts.
         return task;
       },
 
       updateTask: (id, patch) => {
         set((s) => ({
-          tasks: s.tasks.map((t) => (t.id === id ? { ...t, ...patch, updatedAt: nowISO() } : t)),
+          tasks: s.tasks.map((t) => {
+            if (t.id !== id) return t;
+            const merged = { ...t, ...patch };
+            // durationMinutes is never accepted from a patch — always recomputed from
+            // whatever dueTime/endTime the merge lands on, so it can't drift out of sync.
+            merged.durationMinutes = calculateDuration(merged.dueTime, merged.endTime);
+            merged.updatedAt = nowISO();
+            return merged;
+          }),
           activities: logActivityInto(s.activities, 'task_updated', `Updated task "${s.tasks.find((t) => t.id === id)?.title ?? ''}"`),
         }));
+        // No Calendar/Google Calendar side effect here, by design — see the
+        // Task/CalendarEvent independence note on Task in src/types/index.ts.
       },
 
       deleteTask: (id) => {
@@ -338,6 +374,7 @@ export const useStore = create<StennerState>()(
           events: [...s.events, event],
           activities: logActivityInto(s.activities, 'event_created', `Created event "${event.title}"`),
         }));
+        maybeSyncEventToGoogleCalendar(event);
         return event;
       },
 
@@ -673,6 +710,25 @@ export const useStore = create<StennerState>()(
     }),
     {
       name: 'stenner-os-storage-v1',
+      version: 2, // v2: TEOPM moved from timer-driven actualMinutes to Task.dueTime/endTime → durationMinutes
+      migrate: (persistedState, version) => {
+        const state = persistedState as Partial<StennerState> | undefined;
+        if (!state || version >= 2 || !Array.isArray(state.tasks)) return state;
+        state.tasks = state.tasks.map((raw) => {
+          const t = raw as Task;
+          const wasTeopm = t.projectId === TEOPM_PROJECT_ID || (t.tags ?? []).some((tag) => ['TEOPM', 'WORK'].includes(tag.trim().toUpperCase()));
+          let endTime = t.endTime ?? null;
+          // Preserve time already logged the old (timer) way by expressing it as an explicit end time,
+          // instead of silently zeroing out everyone's past TEOPM totals on upgrade.
+          if (wasTeopm && !endTime && t.dueTime && t.actualMinutes > 0) {
+            const [h, m] = t.dueTime.split(':').map(Number);
+            const endTotal = h * 60 + m + t.actualMinutes;
+            endTime = `${String(Math.floor(endTotal / 60) % 24).padStart(2, '0')}:${String(endTotal % 60).padStart(2, '0')}`;
+          }
+          return { ...t, endTime, durationMinutes: calculateDuration(t.dueTime ?? null, endTime) };
+        });
+        return state;
+      },
     }
   )
 );

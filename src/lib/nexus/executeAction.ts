@@ -62,7 +62,11 @@ export function executeNexusAction(call: NexusToolCall): ActionResult {
         priority: (str(args.priority, 'Medium') as 'Low' | 'Medium' | 'High') || 'Medium',
         dueDate: resolveDate(args.dueDate),
         dueTime: str(args.dueTime) || null,
+        endTime: str(args.endTime) || null,
         estimatedMinutes: num(args.estimatedMinutes, 30),
+        ...(args.tags
+          ? { tags: str(args.tags).split(',').map((t) => t.trim()).filter(Boolean) }
+          : {}),
       });
       return { success: true, message: `Created task "${title}".` };
     }
@@ -75,7 +79,11 @@ export function executeNexusAction(call: NexusToolCall): ActionResult {
         ...(args.status ? { status: args.status as never } : {}),
         ...(args.dueDate ? { dueDate: resolveDate(args.dueDate) } : {}),
         ...(args.dueTime ? { dueTime: str(args.dueTime) } : {}),
+        ...(args.endTime ? { endTime: str(args.endTime) } : {}),
         ...(args.estimatedMinutes ? { estimatedMinutes: num(args.estimatedMinutes, task.estimatedMinutes) } : {}),
+        ...(args.tags
+          ? { tags: str(args.tags).split(',').map((t) => t.trim()).filter(Boolean) }
+          : {}),
       });
       return { success: true, message: `Updated "${task.title}".` };
     }

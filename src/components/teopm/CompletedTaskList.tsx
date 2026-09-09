@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { Search, CheckCircle2 } from 'lucide-react';
 import type { Task } from '../../types';
 import { useStore } from '../../store/useStore';
-import { fmtHM, fmtDateTime, isTodayISO, isYesterdayISO, isThisWeekISO, isThisMonthISO } from '../../lib/date';
+import { fmtDateTime, isTodayISO, isYesterdayISO, isThisWeekISO, isThisMonthISO } from '../../lib/date';
+import { toDecimalHours } from '../../store/selectors';
 
 type Filter = 'Today' | 'Yesterday' | 'This Week' | 'This Month' | 'All';
 const FILTERS: Filter[] = ['Today', 'Yesterday', 'This Week', 'This Month', 'All'];
@@ -67,7 +68,9 @@ export function CompletedTaskList({ tasks }: CompletedTaskListProps) {
               </div>
               <div className="text-[10.5px] text-zinc-600 mt-1">Completed: {fmtDateTime(task.completedAt!)}</div>
             </div>
-            <div className="text-[12.5px] font-semibold text-zinc-400 shrink-0">{fmtHM(task.actualMinutes)}</div>
+            <div className="text-[12.5px] font-semibold text-zinc-400 shrink-0 tabular-nums">
+              {task.durationMinutes != null ? `${toDecimalHours(task.durationMinutes)} HRS` : '--'}
+            </div>
           </div>
         ))}
         {completed.length === 0 && <div className="py-10 text-center text-[13px] text-zinc-500">Nothing here yet.</div>}
