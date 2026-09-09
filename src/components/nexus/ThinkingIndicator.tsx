@@ -5,8 +5,8 @@ import { NexusAvatar } from './NexusAvatar';
 // lib/nexus/client.ts) — never a guessed or fabricated state.
 const PHASE_LABELS: Record<NexusPhase, string> = {
   thinking: 'NEXUS is thinking',
-  searching: 'Searching the web',
-  generating_image: 'Generating image',
+  searching: 'Searching the web...',
+  generating_image: 'Generating image...',
 };
 
 export function ThinkingIndicator({ phase = 'thinking' }: { phase?: NexusPhase }) {
