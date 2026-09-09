@@ -11,9 +11,25 @@
 
 export type ChatRole = 'user' | 'model';
 
+/** An image attached to a message — sent for vision analysis, never persisted server-side. */
+export interface ImageAttachment {
+  /** data: URL (e.g. "data:image/png;base64,...") as uploaded from the browser. */
+  dataUrl: string;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  /** Images attached to THIS message, analyzed via the model's vision input — user turns only. */
+  images?: ImageAttachment[];
+  /**
+   * Plain text already extracted server-side from a non-image document
+   * attachment (PDF/DOCX/PPTX/XLSX/CSV/TXT — see server/nexus/fileExtract.ts).
+   * Folded into the model's input as clearly-labeled context, distinct from
+   * the user's own words, so the model never confuses "what the user said"
+   * with "what a file contains".
+   */
+  fileContext?: { fileName: string; text: string }[];
 }
 
 /** A function/tool NEXUS may propose calling — mirrors the JSON-schema shape most providers expect. */
@@ -35,7 +51,17 @@ export interface ToolCall {
 export interface GenerateRequest {
   systemPrompt: string;
   messages: ChatMessage[];
+  /** STENNER OS's own app-action tools (createTask, etc.) — always confirm/cancel, never auto-executed. */
   tools?: ToolDeclaration[];
+  /**
+   * Let the provider's own hosted web-search tool run when the model decides
+   * it needs current information. The model chooses whether to use it per
+   * turn — callers don't classify intent themselves. Providers that don't
+   * support this (e.g. AnthropicProvider's scaffold) simply ignore it.
+   */
+  enableWebSearch?: boolean;
+  /** Same idea for the provider's hosted image-generation tool. */
+  enableImageGeneration?: boolean;
 }
 
 export interface TokenUsage {
@@ -44,10 +70,20 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+/** A citation the model's web-search tool actually returned — never fabricated. */
+export interface WebSource {
+  title: string;
+  url: string;
+}
+
 export interface GenerateResult {
   text: string;
   toolCall?: ToolCall;
   usage?: TokenUsage;
+  /** Images the hosted image-generation tool actually produced, as data: URLs — absent unless it ran. */
+  images?: string[];
+  /** Web citations the hosted web-search tool actually returned — absent unless it ran. Never fabricated. */
+  sources?: WebSource[];
 }
 
 export interface StructuredRequest extends GenerateRequest {
@@ -68,9 +104,16 @@ export abstract class AIProvider {
    * Streamed generation — invokes `onDelta` with each text chunk as it
    * arrives, and resolves with the full text plus a tool call if the model
    * proposed one (providers generally only surface function calls once the
-   * turn is complete, not incrementally).
+   * turn is complete, not incrementally). `onPhase`, if given, fires when a
+   * hosted tool (web search, image generation) starts running — purely
+   * informational, for the UI's connection-status line; never fabricated,
+   * only called when the provider's stream actually reports that event.
    */
-  abstract streamResponse(request: GenerateRequest, onDelta: (delta: string) => void): Promise<GenerateResult>;
+  abstract streamResponse(
+    request: GenerateRequest,
+    onDelta: (delta: string) => void,
+    onPhase?: (phase: 'searching' | 'generating_image') => void
+  ): Promise<GenerateResult>;
 
   /** Ask for a response shaped to a JSON schema — used for anything NEXUS needs as structured data rather than prose. */
   abstract generateStructuredOutput<T = unknown>(request: StructuredRequest): Promise<T>;
