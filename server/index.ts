@@ -1,8 +1,12 @@
 import 'dotenv/config';
 import express from 'express';
-import type { ChatMessage, ToolDeclaration } from './providers/AIProvider.js';
 import { getProvider } from './providers/index.js';
+import { getNexusStatus, isValidChatBody, streamNexusChat } from './nexus/handlers.js';
 
+// This Express server is NEXUS's local-dev backend only — Vite proxies
+// /api/* to it (see vite.config.ts). In production on Vercel, the same
+// behavior is served by api/nexus/status.ts and api/nexus/chat.ts, which
+// call the exact same shared logic in ./nexus/handlers.ts.
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 
@@ -13,24 +17,13 @@ const PORT = Number(process.env.NEXUS_SERVER_PORT) || 8787;
 const provider = getProvider();
 
 app.get('/api/nexus/status', (_req, res) => {
-  res.json({
-    connected: provider.isConfigured(),
-    provider: provider.name,
-  });
+  res.json(getNexusStatus(provider));
 });
 
-interface ChatBody {
-  systemPrompt: string;
-  messages: ChatMessage[];
-  tools?: ToolDeclaration[];
-}
-
-const META_MARKER = '\n\n[[NEXUS_META]]';
-
 app.post('/api/nexus/chat', async (req, res) => {
-  const body = req.body as Partial<ChatBody>;
+  const body = req.body as unknown;
 
-  if (!body || !Array.isArray(body.messages) || body.messages.length === 0) {
+  if (!isValidChatBody(body)) {
     res.status(400).json({ error: 'messages[] is required' });
     return;
   }
@@ -45,22 +38,8 @@ app.post('/api/nexus/chat', async (req, res) => {
   // Flush headers immediately so the client starts reading the stream right away.
   res.flushHeaders?.();
 
-  try {
-    const result = await provider.streamResponse(
-      { systemPrompt: body.systemPrompt ?? '', messages: body.messages, tools: body.tools },
-      (delta) => res.write(delta)
-    );
-    if (result.toolCall || result.usage) {
-      res.write(META_MARKER + JSON.stringify({ toolCall: result.toolCall, usage: result.usage }));
-    }
-    res.end();
-  } catch (err) {
-    // The stream may already have started — write a visible error instead of
-    // changing the status code (headers are already sent by this point).
-    const message = err instanceof Error ? err.message : 'Unknown error talking to the AI provider.';
-    res.write(`\n\n[NEXUS encountered an error: ${message}]`);
-    res.end();
-  }
+  await streamNexusChat(provider, body, (delta) => res.write(delta));
+  res.end();
 });
 
 app.listen(PORT, () => {
