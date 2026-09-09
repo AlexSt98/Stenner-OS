@@ -33,8 +33,8 @@ export function HomePage() {
             </h1>
             <p className="text-[13.5px] text-zinc-500 mt-1">Ideas, plans, and a little bit of chaos. Perfect.</p>
           </div>
-          <div className="hidden md:flex flex-1 items-center justify-center px-4 min-w-0">
-            <img src="/nayncat.gif" alt="" className="h-16 w-auto object-contain opacity-90" />
+          <div className="hidden md:flex flex-1 items-center justify-end pr-2 min-w-0">
+            <img src="/nayncat.gif" alt="" className="h-[106px] w-auto object-contain opacity-90" />
           </div>
           <div className="hidden lg:flex flex-col items-end shrink-0 text-right">
             <div className="text-[11px] tracking-[0.2em] text-zinc-600 font-medium leading-loose">
