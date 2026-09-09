@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { HomePage } from './pages/HomePage';
+import { NexusPage } from './pages/NexusPage';
 import { TeopmWorkdayPage } from './pages/TeopmWorkdayPage';
 import { TasksPage } from './pages/TasksPage';
 import { CalendarPage } from './pages/CalendarPage';
@@ -19,6 +20,7 @@ function App() {
       <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/nexus" element={<NexusPage />} />
           <Route path="/teopm" element={<TeopmWorkdayPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/calendar" element={<CalendarPage />} />

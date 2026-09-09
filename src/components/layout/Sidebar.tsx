@@ -11,12 +11,14 @@ import {
   FolderKanban,
   Languages,
   BarChart2,
+  BrainCircuit,
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { useStore } from '../../store/useStore';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', icon: Home, end: true },
+  { to: '/nexus', label: 'NEXUS', icon: BrainCircuit },
   { to: '/teopm', label: 'TEOPM', icon: Briefcase },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/calendar', label: 'Calendar', icon: Calendar },

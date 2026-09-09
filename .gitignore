@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Secrets — NEXUS's Gemini key (and any other provider key) lives only here, server-side.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

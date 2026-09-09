@@ -18,6 +18,7 @@ import type {
   EnglishSession,
   EnglishAnswer,
 } from '../types';
+import type { NexusConversation, NexusMessage, NexusTokenUsage } from '../types/nexus';
 import {
   SEED_PROJECTS,
   SEED_TASKS,
@@ -48,6 +49,16 @@ export interface EnglishStats {
 
 const EMPTY_ENGLISH_STATS: EnglishStats = { streak: 0, lastPracticeDate: null };
 
+export interface NexusUsage {
+  date: string;
+  requests: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+const EMPTY_NEXUS_USAGE: NexusUsage = { date: todayISO(), requests: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
 interface StennerState {
   tasks: Task[];
   projects: Project[];
@@ -60,6 +71,8 @@ interface StennerState {
   timer: RunningTimer;
   englishSessions: EnglishSession[];
   englishStats: EnglishStats;
+  nexusConversations: NexusConversation[];
+  nexusUsage: NexusUsage;
 
   // ── Tasks ────────────────────────────────────────────────
   addTask: (input: Partial<Task> & { title: string }) => Task;
@@ -114,6 +127,14 @@ interface StennerState {
     exerciseIds: string[];
     answers: EnglishAnswer[];
   }) => EnglishSession;
+
+  // ── NEXUS ────────────────────────────────────────────────
+  createNexusConversation: (title: string) => NexusConversation;
+  appendNexusMessage: (conversationId: string, message: NexusMessage) => void;
+  updateNexusMessage: (conversationId: string, messageId: string, patch: Partial<NexusMessage>) => void;
+  renameNexusConversation: (conversationId: string, title: string) => void;
+  deleteNexusConversation: (conversationId: string) => void;
+  recordNexusUsage: (usage: NexusTokenUsage) => void;
 }
 
 function logActivityInto(activities: Activity[], type: ActivityType, message: string, meta?: Record<string, string>) {
@@ -165,6 +186,8 @@ export const useStore = create<StennerState>()(
       timer: EMPTY_TIMER,
       englishSessions: [],
       englishStats: EMPTY_ENGLISH_STATS,
+      nexusConversations: [],
+      nexusUsage: EMPTY_NEXUS_USAGE,
 
       // ── Tasks ────────────────────────────────────────────
       addTask: (input) => {
@@ -548,6 +571,8 @@ export const useStore = create<StennerState>()(
           timer: EMPTY_TIMER,
           englishSessions: [],
           englishStats: EMPTY_ENGLISH_STATS,
+          nexusConversations: [],
+          nexusUsage: EMPTY_NEXUS_USAGE,
         }));
       },
 
@@ -581,6 +606,69 @@ export const useStore = create<StennerState>()(
           ),
         }));
         return session;
+      },
+
+      // ── NEXUS ──────────────────────────────────────────────
+      createNexusConversation: (title) => {
+        const conversation: NexusConversation = {
+          id: uuid(),
+          title,
+          createdAt: nowISO(),
+          updatedAt: nowISO(),
+          messages: [],
+          contextUsed: [],
+        };
+        set((s) => ({ nexusConversations: [conversation, ...s.nexusConversations] }));
+        return conversation;
+      },
+
+      appendNexusMessage: (conversationId, message) => {
+        set((s) => ({
+          nexusConversations: s.nexusConversations.map((c) =>
+            c.id === conversationId
+              ? {
+                  ...c,
+                  messages: [...c.messages, message],
+                  contextUsed: Array.from(new Set([...c.contextUsed, ...(message.contextLabels ?? [])])),
+                  updatedAt: nowISO(),
+                }
+              : c
+          ),
+        }));
+      },
+
+      updateNexusMessage: (conversationId, messageId, patch) => {
+        set((s) => ({
+          nexusConversations: s.nexusConversations.map((c) =>
+            c.id === conversationId
+              ? { ...c, messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch } : m)), updatedAt: nowISO() }
+              : c
+          ),
+        }));
+      },
+
+      renameNexusConversation: (conversationId, title) => {
+        set((s) => ({ nexusConversations: s.nexusConversations.map((c) => (c.id === conversationId ? { ...c, title } : c)) }));
+      },
+
+      deleteNexusConversation: (conversationId) => {
+        set((s) => ({ nexusConversations: s.nexusConversations.filter((c) => c.id !== conversationId) }));
+      },
+
+      recordNexusUsage: (usage) => {
+        set((s) => {
+          const today = todayISO();
+          const base = s.nexusUsage.date === today ? s.nexusUsage : { ...EMPTY_NEXUS_USAGE, date: today };
+          return {
+            nexusUsage: {
+              date: today,
+              requests: base.requests + 1,
+              promptTokens: base.promptTokens + usage.promptTokens,
+              completionTokens: base.completionTokens + usage.completionTokens,
+              totalTokens: base.totalTokens + usage.totalTokens,
+            },
+          };
+        });
       },
     }),
     {
