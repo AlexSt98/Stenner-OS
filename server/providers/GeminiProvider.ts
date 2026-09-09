@@ -1,7 +1,12 @@
 import { GoogleGenerativeAI, type Content, type Tool, type UsageMetadata } from '@google/generative-ai';
 import { AIProvider, type ChatMessage, type GenerateRequest, type GenerateResult, type StructuredRequest, type TokenUsage } from './AIProvider.js';
 
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+// "gemini-flash-latest" is a Google-maintained alias that always points at
+// the current recommended flash model — more durable than pinning a dated
+// version string, which Google periodically retires (as gemini-2.0-flash
+// and, later, gemini-3.0-flash both were). Override via GEMINI_MODEL in .env
+// if you want a specific pinned version instead.
+const DEFAULT_MODEL = 'gemini-flash-latest';
 
 function toGeminiHistory(messages: ChatMessage[]): Content[] {
   return messages.map((m) => ({ role: m.role, parts: [{ text: m.content }] }));
