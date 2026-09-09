@@ -33,14 +33,13 @@ const INTEGRATIONS = [
 const ROADMAP = [
   { icon: Database, label: 'PostgreSQL', desc: 'Swap LocalStorage for a real database via the same store interface.' },
   { icon: KeyRound, label: 'Authentication', desc: 'Multi-user accounts and session handling.' },
-  { icon: Sparkles, label: 'More AI providers', desc: 'OpenAI and Anthropic are scaffolded in NEXUS — flip AI_PROVIDER once implemented.' },
+  { icon: Sparkles, label: 'More AI providers', desc: 'Anthropic is scaffolded in NEXUS — flip AI_PROVIDER once implemented.' },
   { icon: Webhook, label: 'Webhooks', desc: 'Push activity events to external tools.' },
   { icon: Bot, label: 'Automations', desc: 'Rules like "when idea tagged Merch → create task".' },
 ];
 
 const NEXUS_PROVIDERS = [
-  { id: 'gemini', name: 'Gemini', available: true },
-  { id: 'openai', name: 'OpenAI', available: false },
+  { id: 'openai', name: 'OpenAI', available: true },
   { id: 'claude', name: 'Claude', available: false },
 ] as const;
 
@@ -174,7 +173,7 @@ export function SettingsPage() {
             <div className="text-[11.5px] text-zinc-500">
               {nexusStatus?.connected
                 ? `Talking to ${nexusStatus.provider}.`
-                : 'Add GEMINI_API_KEY to a .env file (copy .env.example) and restart the server.'}
+                : 'Add OPENAI_API_KEY to a .env file (copy .env.example) and restart the server.'}
             </div>
           </div>
           <Button variant="secondary" size="sm" onClick={refreshNexusStatus} disabled={checkingStatus}>

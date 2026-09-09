@@ -2,9 +2,11 @@
 // AIProvider — the abstraction NEXUS talks to.
 //
 // The rest of the server (and 100% of the frontend) never imports a
-// provider SDK directly. Swapping Gemini for OpenAI or Anthropic later means
-// writing one new class here and flipping AI_PROVIDER in .env — nothing
-// else changes, including the /api/nexus route and the entire React app.
+// provider SDK directly. Swapping OpenAI for Anthropic (or anything else)
+// later means writing one new class here and flipping AI_PROVIDER in .env —
+// nothing else changes, including the /api/nexus route and the entire React
+// app. NEXUS ran on Gemini early on; that provider has since been fully
+// removed in favor of OpenAI's Responses API (see OpenAIProvider.ts).
 // ─────────────────────────────────────────────────────────────────────────
 
 export type ChatRole = 'user' | 'model';
