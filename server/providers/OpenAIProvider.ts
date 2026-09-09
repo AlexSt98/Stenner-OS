@@ -1,41 +1,50 @@
 import OpenAI from 'openai';
-import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions';
+import type { Response, ResponseFunctionToolCall, ResponseInputItem, ResponseUsage, Tool as ResponsesTool } from 'openai/resources/responses/responses';
 import { AIProvider, type ChatMessage, type GenerateRequest, type GenerateResult, type StructuredRequest, type TokenUsage } from './AIProvider.js';
 
 // "gpt-4o-mini" is OpenAI's current low-cost, tool-calling-capable default —
 // override via OPENAI_MODEL in .env for a different model.
 const DEFAULT_MODEL = 'gpt-4o-mini';
 
-function toOpenAiMessages(systemPrompt: string, messages: ChatMessage[]): ChatCompletionMessageParam[] {
-  return [
-    { role: 'system', content: systemPrompt },
-    // NEXUS's ChatRole is 'user' | 'model' — OpenAI expects 'assistant' for the model's turn.
-    ...messages.map((m): ChatCompletionMessageParam => ({
-      role: m.role === 'model' ? 'assistant' : 'user',
-      content: m.content,
-    })),
-  ];
-}
-
-function toOpenAiTools(tools: GenerateRequest['tools']): ChatCompletionTool[] | undefined {
-  if (!tools || tools.length === 0) return undefined;
-  return tools.map((t) => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters as Record<string, unknown>,
-    },
+// NEXUS's ChatRole is 'user' | 'model' — the Responses API's EasyInputMessage
+// expects 'user' | 'assistant' (plain string content is accepted directly,
+// no need for the { type: 'input_text', text } content-part wrapper).
+function toResponsesInput(messages: ChatMessage[]): ResponseInputItem[] {
+  return messages.map((m) => ({
+    role: m.role === 'model' ? 'assistant' : 'user',
+    content: m.content,
   }));
 }
 
-function toUsage(usage: OpenAI.CompletionUsage | undefined): TokenUsage | undefined {
+function toResponsesTools(tools: GenerateRequest['tools']): ResponsesTool[] | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  return tools.map((t) => ({
+    type: 'function',
+    name: t.name,
+    description: t.description,
+    parameters: t.parameters as Record<string, unknown>,
+    // NEXUS's tool schemas (src/lib/nexus/tools.ts) aren't authored for the
+    // Responses API's strict mode (which requires e.g. additionalProperties:
+    // false on every object), so leave validation non-strict — same
+    // trust level Chat Completions tool-calling gave us before.
+    strict: null,
+  }));
+}
+
+function toUsage(usage: ResponseUsage | undefined): TokenUsage | undefined {
   if (!usage) return undefined;
   return {
-    promptTokens: usage.prompt_tokens,
-    completionTokens: usage.completion_tokens,
+    promptTokens: usage.input_tokens,
+    completionTokens: usage.output_tokens,
     totalTokens: usage.total_tokens,
   };
+}
+
+/** The Responses API returns tool calls as items in response.output — NEXUS only ever proposes one at a time. */
+function firstFunctionCall(response: Response): GenerateResult['toolCall'] {
+  const item = response.output.find((o): o is ResponseFunctionToolCall => o.type === 'function_call');
+  if (!item) return undefined;
+  return { name: item.name, args: JSON.parse(item.arguments || '{}') as Record<string, unknown> };
 }
 
 export class OpenAIProvider extends AIProvider {
@@ -57,70 +66,58 @@ export class OpenAIProvider extends AIProvider {
   }
 
   async generateResponse({ systemPrompt, messages, tools }: GenerateRequest): Promise<GenerateResult> {
-    const completion = await this.requireClient().chat.completions.create({
+    const response = await this.requireClient().responses.create({
       model: this.model,
-      messages: toOpenAiMessages(systemPrompt, messages),
-      tools: toOpenAiTools(tools),
+      instructions: systemPrompt,
+      input: toResponsesInput(messages),
+      tools: toResponsesTools(tools),
     });
-    const choice = completion.choices[0];
-    const call = choice.message.tool_calls?.[0];
     return {
-      text: choice.message.content ?? '',
-      toolCall:
-        call && call.type === 'function'
-          ? { name: call.function.name, args: JSON.parse(call.function.arguments || '{}') as Record<string, unknown> }
-          : undefined,
-      usage: toUsage(completion.usage),
+      text: response.output_text,
+      toolCall: firstFunctionCall(response),
+      usage: toUsage(response.usage),
     };
   }
 
   async streamResponse({ systemPrompt, messages, tools }: GenerateRequest, onDelta: (delta: string) => void): Promise<GenerateResult> {
-    const stream = await this.requireClient().chat.completions.create({
+    const stream = await this.requireClient().responses.create({
       model: this.model,
-      messages: toOpenAiMessages(systemPrompt, messages),
-      tools: toOpenAiTools(tools),
+      instructions: systemPrompt,
+      input: toResponsesInput(messages),
+      tools: toResponsesTools(tools),
       stream: true,
-      stream_options: { include_usage: true },
     });
 
     let fullText = '';
+    let toolCall: GenerateResult['toolCall'];
     let usage: TokenUsage | undefined;
-    // Tool call arguments arrive as incremental string fragments, keyed by index — accumulate until the stream ends.
-    const toolCallFragments = new Map<number, { name: string; args: string }>();
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (delta?.content) {
-        fullText += delta.content;
-        onDelta(delta.content);
+    for await (const event of stream) {
+      if (event.type === 'response.output_text.delta') {
+        fullText += event.delta;
+        onDelta(event.delta);
+      } else if (event.type === 'response.completed') {
+        usage = toUsage(event.response.usage);
+        toolCall = firstFunctionCall(event.response);
       }
-      for (const tc of delta?.tool_calls ?? []) {
-        const existing = toolCallFragments.get(tc.index) ?? { name: '', args: '' };
-        if (tc.function?.name) existing.name = tc.function.name;
-        if (tc.function?.arguments) existing.args += tc.function.arguments;
-        toolCallFragments.set(tc.index, existing);
-      }
-      if (chunk.usage) usage = toUsage(chunk.usage);
     }
 
-    const firstToolCall = toolCallFragments.get(0);
-    return {
-      text: fullText,
-      toolCall: firstToolCall ? { name: firstToolCall.name, args: JSON.parse(firstToolCall.args || '{}') as Record<string, unknown> } : undefined,
-      usage,
-    };
+    return { text: fullText, toolCall, usage };
   }
 
   async generateStructuredOutput<T = unknown>({ systemPrompt, messages, responseSchema }: StructuredRequest): Promise<T> {
-    // Plain JSON-object mode (widely supported) rather than strict json_schema
-    // mode — the schema is folded into the system prompt as an instruction,
-    // matching what most call sites of this method already expect.
-    const schemaInstruction = `${systemPrompt}\n\nRespond ONLY with a JSON object matching this schema:\n${JSON.stringify(responseSchema)}`;
-    const completion = await this.requireClient().chat.completions.create({
+    const response = await this.requireClient().responses.create({
       model: this.model,
-      messages: toOpenAiMessages(schemaInstruction, messages),
-      response_format: { type: 'json_object' },
+      instructions: systemPrompt,
+      input: toResponsesInput(messages),
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'response',
+          schema: responseSchema,
+        },
+      },
     });
-    return JSON.parse(completion.choices[0].message.content ?? '{}') as T;
+    return JSON.parse(response.output_text) as T;
   }
 }

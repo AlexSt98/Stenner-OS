@@ -17,7 +17,7 @@ export async function fetchNexusStatus(force = false): Promise<NexusStatus> {
     cachedStatus = await res.json();
     return cachedStatus!;
   } catch {
-    cachedStatus = { connected: false, provider: 'gemini' };
+    cachedStatus = { connected: false, provider: 'openai' };
     return cachedStatus;
   }
 }

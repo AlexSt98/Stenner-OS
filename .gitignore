@@ -12,7 +12,7 @@ dist
 dist-ssr
 *.local
 
-# Secrets — NEXUS's Gemini key (and any other provider key) lives only here, server-side.
+# Secrets — NEXUS's OpenAI key (and any other provider key) lives only here, server-side.
 .env
 .env.*
 !.env.example

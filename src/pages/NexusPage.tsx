@@ -49,7 +49,7 @@ export function NexusPage() {
   const [activeId, setActiveId] = useState<string | null>(conversations[0]?.id ?? null);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [status, setStatus] = useState<NexusStatus>({ connected: false, provider: 'gemini' });
+  const [status, setStatus] = useState<NexusStatus>({ connected: false, provider: 'openai' });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {

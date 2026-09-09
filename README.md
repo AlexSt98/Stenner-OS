@@ -52,11 +52,11 @@ All shapes live in [`src/types/index.ts`](src/types/index.ts): `Task`, `Project`
 
 ## NEXUS — connecting a real AI provider
 
-1. `cp .env.example .env` and set `GEMINI_API_KEY` (get one at https://aistudio.google.com/apikey). **Never** put it in frontend code, LocalStorage, or `VITE_`-prefixed vars — `server/` is the only thing that reads it, via plain `process.env`.
+1. `cp .env.example .env` and set `OPENAI_API_KEY` (get one at https://platform.openai.com/api-keys). **Never** put it in frontend code, LocalStorage, or `VITE_`-prefixed vars — `server/` is the only thing that reads it, via plain `process.env`.
 2. Restart `npm run dev` (the server reads `.env` once at boot).
-3. Settings → NEXUS shows "Connected" once it can see the key; NEXUS itself switches from demo mode to real Gemini responses automatically.
+3. Settings → NEXUS shows "Connected" once it can see the key; NEXUS itself switches from demo mode to real OpenAI responses automatically.
 
-**Architecture** — the frontend talks to exactly one endpoint, `/api/nexus/*` (see `src/lib/nexus/client.ts`), and never imports a provider SDK. The server maps that to an `AIProvider` abstraction (`server/providers/AIProvider.ts`: `generateResponse` / `streamResponse` / `generateStructuredOutput`); `GeminiProvider` is the only one implemented, `OpenAIProvider`/`AnthropicProvider` are typed scaffolds that throw until someone fills them in — adding a real one and flipping `AI_PROVIDER` in `.env` is the entire migration, no frontend or route changes. Tool/function calls (creating a task, etc.) come back from the model as structured data over the same stream and always render as a confirm/cancel `ActionCard` — see `src/lib/nexus/tools.ts` (declarations) and `src/lib/nexus/executeAction.ts` (the one place a tool call becomes a real store mutation, only on explicit confirm).
+**Architecture** — the frontend talks to exactly one endpoint, `/api/nexus/*` (see `src/lib/nexus/client.ts`), and never imports a provider SDK. The server maps that to an `AIProvider` abstraction (`server/providers/AIProvider.ts`: `generateResponse` / `streamResponse` / `generateStructuredOutput`); `OpenAIProvider` (built on OpenAI's Responses API) is the only one implemented, `AnthropicProvider` is a typed scaffold that throws until someone fills it in — adding a real one and flipping `AI_PROVIDER` in `.env` is the entire migration, no frontend or route changes. NEXUS originally ran on Gemini; that provider has been fully removed. Tool/function calls (creating a task, etc.) come back from the model as structured data over the same stream and always render as a confirm/cancel `ActionCard` — see `src/lib/nexus/tools.ts` (declarations) and `src/lib/nexus/executeAction.ts` (the one place a tool call becomes a real store mutation, only on explicit confirm).
 
 ## Integrations (scaffolded, not wired)
 
