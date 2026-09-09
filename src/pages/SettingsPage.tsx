@@ -43,6 +43,11 @@ const NEXUS_PROVIDERS = [
   { id: 'claude', name: 'Claude', available: false },
 ] as const;
 
+// /api/nexus/status returns the provider's internal `name` (e.g. "openai",
+// lowercase — see AIProvider.name). This only maps it to the display label
+// already used above in NEXUS_PROVIDERS, for the "Talking to …" line.
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', anthropic: 'Claude' };
+
 export function SettingsPage() {
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
@@ -172,7 +177,7 @@ export function SettingsPage() {
             <div className="text-[13px] font-medium">{nexusStatus?.connected ? 'Connected' : 'Not connected'}</div>
             <div className="text-[11.5px] text-zinc-500">
               {nexusStatus?.connected
-                ? `Talking to ${nexusStatus.provider}.`
+                ? `Talking to ${PROVIDER_DISPLAY_NAMES[nexusStatus.provider] ?? nexusStatus.provider}.`
                 : 'Add OPENAI_API_KEY to a .env file (copy .env.example) and restart the server.'}
             </div>
           </div>
