@@ -10,6 +10,7 @@ import {
   Lightbulb,
   FolderKanban,
   Languages,
+  FlaskConical,
   BarChart2,
   BrainCircuit,
   Settings as SettingsIcon,
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { to: '/ideas', label: 'Ideas Vault', icon: Lightbulb },
   { to: '/projects', label: 'Projects', icon: FolderKanban },
   { to: '/english', label: 'English Lab', icon: Languages },
+  { to: '/marketing', label: 'Marketing', icon: FlaskConical },
   { to: '/stats', label: 'Stats', icon: BarChart2 },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

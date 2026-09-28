@@ -112,3 +112,62 @@
 .animate-stenner-fade-in {
   animation: stenner-fade-in 200ms ease-out;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Marketing Lab
+   Additive only — no existing token is redefined, so nothing else in
+   STENNER OS changes appearance.
+   ───────────────────────────────────────────────────────────────────────── */
+
+@layer components {
+  /* A slightly lighter, airier surface for long research sessions. Same
+     palette and same 14px radius as .stenner-card — it reads as the same
+     system, just with more room to breathe. */
+  .stenner-panel {
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 14px;
+  }
+}
+
+/* Marketing Book → PDF. The browser's own print pipeline renders the
+   document; this strips the app chrome so what prints is the book alone,
+   on white, with sections kept whole across page breaks. */
+@media print {
+  @page {
+    margin: 18mm 16mm;
+  }
+
+  aside,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  .print-document section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: none !important;
+    background: none !important;
+    padding: 0 0 14pt 0 !important;
+    margin-bottom: 10pt;
+  }
+
+  .print-document h1,
+  .print-document h2 {
+    color: #111 !important;
+  }
+
+  .print-document,
+  .print-document * {
+    color: #222 !important;
+  }
+}

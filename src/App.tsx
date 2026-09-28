@@ -13,6 +13,17 @@ import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { EnglishLabPage } from './pages/EnglishLabPage';
 import { StatsPage } from './pages/StatsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { MarketingLabPage } from './pages/marketing/MarketingLabPage';
+import { WorkspaceLayout } from './pages/marketing/WorkspaceLayout';
+import { ControlCenterPage } from './pages/marketing/ControlCenterPage';
+import { PhaseWorkbenchPage } from './pages/marketing/PhaseWorkbenchPage';
+import { EvidencePage } from './pages/marketing/EvidencePage';
+import { HypothesesPage } from './pages/marketing/HypothesesPage';
+import { DecisionsPage } from './pages/marketing/DecisionsPage';
+import { GapsPage } from './pages/marketing/GapsPage';
+import { KnowledgePage } from './pages/marketing/KnowledgePage';
+import { StrategyPage } from './pages/marketing/StrategyPage';
+import { BookPage } from './pages/marketing/BookPage';
 
 function App() {
   return (
@@ -31,6 +42,22 @@ function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="/english" element={<EnglishLabPage />} />
+
+          {/* Marketing Lab — the workspace layout owns loading one project's
+              data, so every child route reads only that project's records. */}
+          <Route path="/marketing" element={<MarketingLabPage />} />
+          <Route path="/marketing/:workspaceId" element={<WorkspaceLayout />}>
+            <Route index element={<ControlCenterPage />} />
+            <Route path="phase/:phaseKey" element={<PhaseWorkbenchPage />} />
+            <Route path="evidence" element={<EvidencePage />} />
+            <Route path="hypotheses" element={<HypothesesPage />} />
+            <Route path="decisions" element={<DecisionsPage />} />
+            <Route path="gaps" element={<GapsPage />} />
+            <Route path="knowledge" element={<KnowledgePage />} />
+            <Route path="strategy" element={<StrategyPage />} />
+            <Route path="book" element={<BookPage />} />
+          </Route>
+
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

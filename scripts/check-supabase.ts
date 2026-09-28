@@ -71,11 +71,14 @@ async function main() {
   console.log('\x1b[2mRead-only. No secret values are printed. Nothing is written.\x1b[0m\n');
 
   console.log('\x1b[1m1. Environment\x1b[0m');
-  SUPABASE_URL ? ok(`VITE_SUPABASE_URL — ${describeUrl(SUPABASE_URL)}`) : bad('VITE_SUPABASE_URL is missing');
-  ANON ? ok(`VITE_SUPABASE_ANON_KEY — ${describeKey(ANON)}`) : bad('VITE_SUPABASE_ANON_KEY is missing');
-  SERVICE
-    ? ok(`SUPABASE_SERVICE_ROLE_KEY — ${describeKey(SERVICE)}`)
-    : info('SUPABASE_SERVICE_ROLE_KEY not set (optional — needed to list tables and users)');
+  if (SUPABASE_URL) ok(`VITE_SUPABASE_URL — ${describeUrl(SUPABASE_URL)}`);
+  else bad('VITE_SUPABASE_URL is missing');
+
+  if (ANON) ok(`VITE_SUPABASE_ANON_KEY — ${describeKey(ANON)}`);
+  else bad('VITE_SUPABASE_ANON_KEY is missing');
+
+  if (SERVICE) ok(`SUPABASE_SERVICE_ROLE_KEY — ${describeKey(SERVICE)}`);
+  else info('SUPABASE_SERVICE_ROLE_KEY not set (optional — needed to list tables and users)');
 
   if (ANON && SERVICE && ANON === SERVICE) {
     bad('anon key and service-role key are IDENTICAL — one of them is pasted wrong');
