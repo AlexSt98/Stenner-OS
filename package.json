@@ -10,9 +10,11 @@
     "build": "tsc -b && vite build",
     "check:server": "tsc --noEmit -p tsconfig.server.json",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:supabase": "tsx scripts/check-supabase.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
     "date-fns": "^4.4.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
