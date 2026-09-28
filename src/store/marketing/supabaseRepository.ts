@@ -68,7 +68,7 @@ export const supabaseRepository: MarketingRepository = {
   async updateWorkspace(id, patch) {
     const { data, error } = await requireSupabase()
       .from(WORKSPACES_TABLE)
-      .update(toRow({ ...patch, updatedAt: new Date().toISOString() }))
+      .update(toRow(patch))
       .eq('id', id)
       .select()
       .single();
@@ -109,10 +109,15 @@ export const supabaseRepository: MarketingRepository = {
     return fromRow<Row<K>>(data);
   },
 
+  // updated_at is deliberately NOT sent from here. The ml_touch_updated_at
+  // trigger owns it, which keeps it honest, and — more importantly —
+  // ml_notes, ml_sources and ml_evidence_links have no updated_at column at
+  // all (nothing about them is mutable in a way worth timestamping). Sending
+  // it unconditionally would fail on exactly those three tables.
   async update<K extends CollectionKey>(collection: K, id: string, patch: Partial<Row<K>>) {
     const { data, error } = await requireSupabase()
       .from(TABLE_NAMES[collection])
-      .update(toRow({ ...(patch as object), updatedAt: new Date().toISOString() }))
+      .update(toRow(patch as object))
       .eq('id', id)
       .select()
       .single();

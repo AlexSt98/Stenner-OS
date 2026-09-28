@@ -107,8 +107,11 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
     const workspaceId = get().activeWorkspaceId;
     if (!workspaceId) return null;
 
-    const now = new Date().toISOString();
-    const payload = { workspaceId, createdAt: now, updatedAt: now, ...row } as unknown as Omit<Row<typeof collection>, 'id'>;
+    // Timestamps belong to the adapter, not here: Postgres fills them from
+    // column defaults, and three tables (notes, sources, evidence links)
+    // have no updated_at at all, so sending one unconditionally would fail
+    // against Supabase.
+    const payload = { workspaceId, ...row } as unknown as Omit<Row<typeof collection>, 'id'>;
 
     try {
       const created = await repository.insert(collection, payload);

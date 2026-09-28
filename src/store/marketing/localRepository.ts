@@ -142,7 +142,11 @@ export const localRepository: MarketingRepository = {
     const db = read();
     const workspaceId = (row as { workspaceId: string }).workspaceId;
     const bucket = db.data[workspaceId] ?? (db.data[workspaceId] = { ...EMPTY_WORKSPACE_DATA });
-    const created = { ...row, id: uuid() } as Row<K>;
+    // Postgres fills these from column defaults; here there is no database
+    // to do it, so the adapter supplies them. Anything the caller already
+    // set (the workspace seed does) wins.
+    const now = new Date().toISOString();
+    const created = { createdAt: now, updatedAt: now, ...row, id: uuid() } as Row<K>;
     (bucket[collection] as Row<K>[]) = [...(bucket[collection] as Row<K>[]), created];
     write(db);
     return tick(created);
