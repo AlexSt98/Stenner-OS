@@ -44,6 +44,7 @@
     "concurrently": "^10.0.5",
     "oxlint": "^1.79.0",
     "postcss": "^8.5.28",
+    "supabase": "^2.118.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
     "typescript": "~6.0.2",

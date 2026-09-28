@@ -171,30 +171,64 @@ async function main() {
     bad(`could not introspect schema (${(err as Error).message})`);
   }
 
-  // The practical RLS test: can an UNAUTHENTICATED caller read the table?
-  // The anon key ships inside the public JS bundle, so anything readable
-  // here is readable by anyone on the internet. SELECT/head only — no rows
-  // are fetched and nothing is written.
-  console.log('\n\x1b[1m5. RLS audit (anon, unauthenticated)\x1b[0m');
+  // ── RLS audit ────────────────────────────────────────────────────────
+  // The anon key ships inside the public JS bundle, so anything an
+  // unauthenticated caller can read is readable by anyone on the internet.
+  //
+  // The test compares what anon sees against what service_role sees. That
+  // comparison matters: with RLS ON and no anon policy, PostgREST answers
+  // 200 with zero rows — it does NOT return an error. So "no error" alone
+  // proves nothing, and an earlier version of this check wrongly reported
+  // every protected-but-empty table as exposed.
+  //
+  //   anon sees rows          → EXPOSED, unambiguously
+  //   anon 0 / service_role N → PROTECTED, proven by the difference
+  //   both 0 (empty table)    → INCONCLUSIVE from outside, and said so
+  //
+  // SELECT with head only: no rows are fetched and nothing is written.
+  console.log('\n\x1b[1m5. RLS audit (anon vs service_role)\x1b[0m');
   if (tables.length === 0) {
     info('no tables to audit');
   } else {
     const anonClient = createClient(SUPABASE_URL, ANON, { auth: { persistSession: false } });
+    const adminClient = SERVICE ? createClient(SUPABASE_URL, SERVICE, { auth: { persistSession: false } }) : null;
+
     const exposed: string[] = [];
+    let inconclusive = 0;
+
     for (const table of tables) {
-      const { error, count } = await anonClient.from(table).select('*', { count: 'exact', head: true });
-      if (!error) {
+      const anonResult = await anonClient.from(table).select('*', { count: 'exact', head: true });
+      const adminCount = adminClient
+        ? (await adminClient.from(table).select('*', { count: 'exact', head: true })).count ?? 0
+        : null;
+
+      if (anonResult.error) {
+        // An explicit refusal is the strongest possible signal.
+        ok(`${table} — protected (anon refused)`);
+        continue;
+      }
+
+      const anonCount = anonResult.count ?? 0;
+      if (anonCount > 0) {
         exposed.push(table);
-        bad(`${table} — READABLE without auth (${count ?? 0} rows) → RLS off or policy too open`);
-      } else if (/row-level security|permission denied|JWT|not authorized/i.test(error.message)) {
-        ok(`${table} — protected`);
+        bad(`${table} — EXPOSED: anon can read ${anonCount} row(s)`);
+      } else if (adminCount !== null && adminCount > 0) {
+        ok(`${table} — protected (anon 0 of ${adminCount} rows)`);
       } else {
-        info(`${table} — ${error.message.slice(0, 70)}`);
+        inconclusive += 1;
+        info(`${table} — empty; anon sees nothing, but an empty table cannot prove RLS either way`);
       }
     }
+
     if (exposed.length > 0) {
       console.log(`\n  \x1b[31m${exposed.length} table(s) are world-readable.\x1b[0m The anon key is public by design,`);
       console.log('  so anyone who opens DevTools on the deployed app can read this data.');
+    }
+    if (inconclusive > 0) {
+      console.log(
+        `\n  \x1b[2m${inconclusive} table(s) are empty, so this check cannot confirm RLS from the client.\x1b[0m`
+      );
+      console.log('  \x1b[2mRe-run once there is data, or verify the policies in the dashboard.\x1b[0m');
     }
   }
 
