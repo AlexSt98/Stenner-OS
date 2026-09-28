@@ -1,18 +1,22 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Backend selection.
 //
-// The local adapter is the default and the only one reachable right now:
-// the Supabase migration has not been applied, so the ml_* tables do not
-// exist. Nothing entered in Marketing Lab reaches the database until BOTH
-// are true:
+// Supabase is the default whenever credentials are present: the migration
+// has been applied (supabase/migrations/20260928140000_marketing_lab.sql),
+// so the ml_* tables exist and research persists across devices and browser
+// resets.
 //
-//   1. supabase/migrations/0001_marketing_lab.sql has been run, and
-//   2. VITE_MARKETING_BACKEND=supabase is set.
+// Two escape hatches, both explicit:
 //
-// Requiring the explicit flag — rather than switching automatically the
-// moment Supabase credentials appear — is what guarantees that preparing
-// the connection can never silently start writing to a database that has
-// not been reviewed.
+//   VITE_MARKETING_BACKEND=local   forces the browser-only adapter, for
+//                                  working offline or against a database
+//                                  you would rather not touch.
+//   no credentials                 falls back to local rather than failing
+//                                  to boot, so a fresh clone still runs.
+//
+// The local adapter keeps its own storage key and never touches
+// stenner-os-storage-v1, so the two backends cannot contaminate each other
+// or anything else in STENNER OS.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { isSupabaseConfigured } from '../../lib/supabase/client';
@@ -20,12 +24,16 @@ import { localRepository } from './localRepository';
 import { supabaseRepository } from './supabaseRepository';
 import type { MarketingRepository } from './repository';
 
-const REQUESTED = (import.meta.env.VITE_MARKETING_BACKEND as string | undefined) ?? 'local';
+const FORCED = import.meta.env.VITE_MARKETING_BACKEND as string | undefined;
 
-export const repository: MarketingRepository =
-  REQUESTED === 'supabase' && isSupabaseConfigured() ? supabaseRepository : localRepository;
+const useLocal = FORCED === 'local' || !isSupabaseConfigured();
 
-/** True when the flag asked for Supabase but the credentials are missing. */
-export const backendFellBack = REQUESTED === 'supabase' && !isSupabaseConfigured();
+export const repository: MarketingRepository = useLocal ? localRepository : supabaseRepository;
+
+/** True when Supabase was wanted but no credentials were found. */
+export const missingCredentials = FORCED !== 'local' && !isSupabaseConfigured();
+
+/** True when the local adapter is active because someone asked for it. */
+export const forcedLocal = FORCED === 'local';
 
 export type { MarketingRepository } from './repository';

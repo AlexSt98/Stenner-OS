@@ -19,6 +19,7 @@ import { create } from 'zustand';
 import type { MarketingWorkspaceData, MLWorkspace, WorkspaceMode } from '../../types/marketing';
 import { EMPTY_WORKSPACE_DATA } from '../../types/marketing';
 import { repository } from './index';
+import { INITIAL_WORKSPACES } from './seedWorkspace';
 import type { CollectionKey, Row } from './repository';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -72,7 +73,22 @@ export const useMarketingStore = create<MarketingState>((set, get) => ({
     if (get().workspacesStatus === 'loading') return;
     set({ workspacesStatus: 'loading', workspacesError: null });
     try {
-      set({ workspaces: await repository.listWorkspaces(), workspacesStatus: 'ready' });
+      let workspaces = await repository.listWorkspaces();
+
+      // First run against a fresh database: create the two projects the
+      // product ships with. Only their identity — each gets the 14-phase
+      // framework and its questions, and no findings whatsoever. Guarded on
+      // the list being empty, so it happens exactly once and never
+      // resurrects a project that was deliberately deleted... unless every
+      // one is gone, which is indistinguishable from a first run.
+      if (workspaces.length === 0) {
+        for (const seed of INITIAL_WORKSPACES) {
+          await repository.createWorkspace(seed);
+        }
+        workspaces = await repository.listWorkspaces();
+      }
+
+      set({ workspaces, workspacesStatus: 'ready' });
     } catch (err) {
       set({ workspacesStatus: 'error', workspacesError: message(err) });
     }

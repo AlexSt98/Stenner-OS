@@ -14,13 +14,14 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, FlaskConical, Plus } from 'lucide-react';
 import { useMarketingStore } from '../../store/marketing/useMarketingStore';
-import { repository } from '../../store/marketing';
+import { forcedLocal, missingCredentials, repository } from '../../store/marketing';
 import type { MarketingWorkspaceData, MLWorkspace } from '../../types/marketing';
 import { currentPhaseKey, overallProgress } from '../../lib/marketing/progress';
 import { detectGaps } from '../../lib/marketing/gaps';
 import { nextResearchAction } from '../../lib/marketing/nextAction';
 import { phaseLabel } from '../../lib/marketing/phaseTemplates';
 import { EmptyState, ErrorState, LoadingState, ProgressRing } from '../../components/marketing/primitives';
+import { SessionBadge } from '../../components/marketing/AuthGate';
 import { Button } from '../../components/common/Button';
 import { Modal } from '../../components/common/Modal';
 import { FieldRow, Label, TextArea, TextInput } from '../../components/common/Fields';
@@ -93,17 +94,29 @@ export function MarketingLabPage() {
             Research → evidence → hypothesis → validation → decision → strategy.
           </p>
         </div>
-        <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-          <Plus size={14} /> New research project
-        </Button>
+        <div className="flex items-center gap-3">
+          <SessionBadge />
+          <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+            <Plus size={14} /> New research project
+          </Button>
+        </div>
       </div>
 
       {backend === 'local' && (
         <div className="flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.06]">
           <FlaskConical size={14} className="text-amber-400 mt-0.5 shrink-0" />
           <p className="text-[12px] text-amber-200/80 leading-relaxed">
-            <span className="font-semibold text-amber-200">Local preview mode.</span> The Supabase migration has not been
-            applied yet, so research is stored in this browser only and nothing is written to the database.
+            {missingCredentials ? (
+              <>
+                <span className="font-semibold text-amber-200">No database connected.</span> Set VITE_SUPABASE_URL and
+                VITE_SUPABASE_ANON_KEY to persist research; until then it is stored in this browser only.
+              </>
+            ) : forcedLocal ? (
+              <>
+                <span className="font-semibold text-amber-200">Local mode (forced).</span> VITE_MARKETING_BACKEND=local
+                is set, so research stays in this browser and nothing reaches Supabase.
+              </>
+            ) : null}
           </p>
         </div>
       )}

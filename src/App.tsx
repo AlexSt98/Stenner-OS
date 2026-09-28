@@ -24,6 +24,7 @@ import { GapsPage } from './pages/marketing/GapsPage';
 import { KnowledgePage } from './pages/marketing/KnowledgePage';
 import { StrategyPage } from './pages/marketing/StrategyPage';
 import { BookPage } from './pages/marketing/BookPage';
+import { AuthGate } from './components/marketing/AuthGate';
 
 function App() {
   return (
@@ -43,10 +44,13 @@ function App() {
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="/english" element={<EnglishLabPage />} />
 
-          {/* Marketing Lab — the workspace layout owns loading one project's
-              data, so every child route reads only that project's records. */}
-          <Route path="/marketing" element={<MarketingLabPage />} />
-          <Route path="/marketing/:workspaceId" element={<WorkspaceLayout />}>
+          {/* Marketing Lab — the only part of STENNER OS behind a sign-in,
+              because it is the only part whose data lives in Supabase under
+              row-level security. Everything else still needs no account.
+              The workspace layout owns loading one project's data, so every
+              child route reads only that project's records. */}
+          <Route path="/marketing" element={<AuthGate><MarketingLabPage /></AuthGate>} />
+          <Route path="/marketing/:workspaceId" element={<AuthGate><WorkspaceLayout /></AuthGate>}>
             <Route index element={<ControlCenterPage />} />
             <Route path="phase/:phaseKey" element={<PhaseWorkbenchPage />} />
             <Route path="evidence" element={<EvidencePage />} />
